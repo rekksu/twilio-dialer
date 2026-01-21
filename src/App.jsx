@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Device } from "@twilio/voice-sdk";
+import { Device, VoiceGrant, AccessToken } from "@twilio/voice-sdk";
 import axios from "axios";
 
 const CLOUD_FUNCTION_URL =
@@ -10,7 +10,9 @@ export default function App() {
   const [device, setDevice] = useState(null);
   const [connection, setConnection] = useState(null);
 
-  const toNumber = "+639215991234"; // Static number for testing
+  // Get dynamic number from URL query string
+  const urlParams = new URLSearchParams(window.location.search);
+  const toNumber = urlParams.get("to"); // example: ?to=+639215991234
 
   const checkMicPermission = async () => {
     try {
@@ -28,6 +30,11 @@ export default function App() {
   };
 
   const startCall = async () => {
+    if (!toNumber) {
+      setStatus("No phone number provided in ?to= parameter");
+      return;
+    }
+
     const micAllowed = await checkMicPermission();
     if (!micAllowed) return;
 
@@ -36,8 +43,8 @@ export default function App() {
 
       const res = await axios.get(`${CLOUD_FUNCTION_URL}?identity=agent`);
       const token = res.data.token;
-      console.log("Twilio token fetched:", token);
 
+      console.log("Twilio token fetched:", token);
       setStatus("Initializing Twilio Device…");
 
       const twilioDevice = new Device(token, { enableRingingState: true });
@@ -57,23 +64,15 @@ export default function App() {
         twilioDevice.on(evt, (...args) => console.log(evt, args));
       });
 
-      // Explicitly register the Device
+      // Register the device
       twilioDevice.register();
 
+      // When registered, call the dynamic number
       twilioDevice.on("registered", () => {
         console.log("Device registered ✅");
-        setStatus("Device registered, ready to call…");
-
-        // Automatically make the call
-        if (toNumber) {
-          setStatus(`Calling ${toNumber}…`);
-          const conn = twilioDevice.connect({ To: toNumber });
-          setConnection(conn);
-        }
-      });
-
-      twilioDevice.on("ready", () => {
-        console.log("Device ready ✅");
+        setStatus(`Calling ${toNumber}…`);
+        const conn = twilioDevice.connect({ To: toNumber });
+        setConnection(conn);
       });
 
       twilioDevice.on("error", (err) => {
@@ -82,6 +81,7 @@ export default function App() {
       });
 
       setDevice(twilioDevice);
+
     } catch (err) {
       console.error("Failed to start call:", err);
       setStatus("Error: " + err.message);
@@ -96,7 +96,7 @@ export default function App() {
 
   return (
     <div style={{ textAlign: "center", padding: "20px" }}>
-      <h2>Twilio Web Dialer (TwiML Bin)</h2>
+      <h2>Twilio Web Dialer (voiceOutbound)</h2>
       <p>{status}</p>
       <button
         onClick={startCall}
