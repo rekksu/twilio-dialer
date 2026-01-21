@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Device } from "@twilio/voice-sdk";
-import "./style.css"
+import "./style.css";
 
 const CLOUD_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
@@ -10,35 +10,27 @@ export default function App() {
   const [device, setDevice] = useState(null);
   const [connection, setConnection] = useState(null);
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [callDuration, setCallDuration] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
 
+  // Get number from URL
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const urlNumber = urlParams.get("to");
-    if (urlNumber) setPhoneNumber(urlNumber);
-    else setStatus("❌ No phone number provided in URL (?to=+1234567890)");
+    if (urlNumber) {
+      setPhoneNumber(urlNumber);
+      setStatus("Ready to call…");
+    } else {
+      setStatus("❌ No phone number provided in URL (?to=+1234567890)");
+    }
   }, []);
 
+  // Start call immediately when phoneNumber is set
   useEffect(() => {
-    let interval;
-    if (isConnected) {
-      interval = setInterval(() => setCallDuration(prev => prev + 1), 1000);
-    } else {
-      setCallDuration(0);
+    if (phoneNumber) {
+      startCall();
     }
-    return () => clearInterval(interval);
-  }, [isConnected]);
-
-  useEffect(() => {
-    if (phoneNumber && !device) startCall();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phoneNumber]);
-
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
-  };
 
   const checkMicPermission = async () => {
     try {
@@ -59,33 +51,50 @@ export default function App() {
 
   const startCall = async () => {
     const formattedNumber = formatPhoneNumber(phoneNumber);
-    if (!formattedNumber || formattedNumber.length < 10) {
+    if (!formattedNumber) {
       setStatus("❌ Invalid phone number");
       return;
     }
 
-    if (!(await checkMicPermission())) return;
+    const micAllowed = await checkMicPermission();
+    if (!micAllowed) return;
 
     try {
-      setStatus("Connecting...");
+      setStatus("Fetching Twilio token…");
       const res = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
       const data = await res.json();
       const token = data.token;
 
-      const twilioDevice = new Device(token, { enableRingingState: true, codecPreferences: ["opus","pcmu"], logLevel: 1 });
+      const twilioDevice = new Device(token, { enableRingingState: true });
 
       twilioDevice.on("registered", () => {
-        setStatus("Calling...");
+        setStatus(`Calling ${formattedNumber}…`);
+        // Make the call only after device is registered
         const conn = twilioDevice.connect({ params: { To: formattedNumber } });
-
-        conn.on("accept", () => { setStatus("Connected"); setIsConnected(true); });
-        conn.on("disconnect", () => { setStatus("Call ended"); setIsConnected(false); });
-        conn.on("error", (err) => { setStatus(`Call failed: ${err.message}`); setIsConnected(false); });
-
         setConnection(conn);
+
+        conn.on("accept", () => {
+          setStatus("Call connected");
+          setIsConnected(true);
+        });
+
+        conn.on("disconnect", () => {
+          setStatus("Call ended");
+          setIsConnected(false);
+          setConnection(null);
+        });
+
+        conn.on("error", (err) => {
+          setStatus(`Call failed: ${err.message}`);
+          setIsConnected(false);
+          setConnection(null);
+        });
       });
 
-      twilioDevice.on("error", (err) => setStatus(`Error: ${err.message}`));
+      twilioDevice.on("error", (err) => {
+        setStatus(`Device error: ${err.message}`);
+      });
+
       twilioDevice.register();
       setDevice(twilioDevice);
 
@@ -95,30 +104,37 @@ export default function App() {
   };
 
   const hangup = () => {
-    if (connection) connection.disconnect();
-    if (device) device.destroy();
-    setConnection(null);
-    setDevice(null);
+    if (connection) {
+      connection.disconnect();
+      setConnection(null);
+    }
+    if (device) {
+      device.destroy();
+      setDevice(null);
+    }
     setIsConnected(false);
     setStatus("Call ended");
   };
 
+  const redial = () => {
+    hangup();
+    setTimeout(() => startCall(), 500);
+  };
+
   return (
     <div className="container">
-      <div className="title">Twilio Call</div>
+      <h2 className="title">Twilio Web Dialer</h2>
+
       <div className="status">{status}</div>
+
       <div className="phone-number">{phoneNumber || "No number"}</div>
-      {isConnected && (
-        <div style={{ fontSize: "28px", color: "#fff", marginBottom: "20px", fontVariantNumeric: "tabular-nums" }}>
-          {formatTime(callDuration)}
-        </div>
-      )}
+
       <div className="buttons">
-        <button className="redial-btn" onClick={startCall} disabled={isConnected || !phoneNumber}>
+        <button className="redial-btn" onClick={redial} disabled={isConnected || !phoneNumber}>
           🔄 Redial
         </button>
-        <button className="hangup-btn" onClick={hangup} disabled={!connection}>
-          ✖️ Hang Up
+        <button className="hangup-btn" onClick={hangup} disabled={!isConnected}>
+          📴 Hang Up
         </button>
       </div>
     </div>
