@@ -26,46 +26,33 @@ export default function App() {
       return;
     }
 
-    const mic = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
-    if (!mic) return setStatus("❌ Microphone denied");
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
+    if (!stream) return setStatus("❌ Microphone denied");
 
-    try {
-      setStatus("Fetching token...");
-      const res = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
-      const { token } = await res.json();
+    const res = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
+    const { token } = await res.json();
+    setStatus("Initializing Twilio Device…");
 
-      const twilioDevice = new Device(token, { enableRingingState: true });
-      setDevice(twilioDevice);
+    const twilioDevice = new Device(token, { enableRingingState: true });
+    setDevice(twilioDevice);
 
-      twilioDevice.on("ready", () => {
-        setStatus("Device ready. Calling...");
-        try {
-          const conn = twilioDevice.connect({ params: { To: phoneNumber } });
-          if (!conn) return setStatus("Connection failed");
-          connectionRef.current = conn;
+    twilioDevice.on("ready", () => setStatus("Device ready. Calling…"));
+    twilioDevice.on("error", (err) => setStatus(`Device error: ${err.message}`));
 
-          conn.on("accept", () => setStatus("Call connected"));
-          conn.on("disconnect", () => setStatus("Call ended"));
-          conn.on("error", (err) => setStatus("Call error: " + err.message));
-        } catch (err) {
-          console.error("Connect failed:", err);
-          setStatus("Connect failed: " + err.message);
-        }
-      });
+    twilioDevice.register();
 
-      twilioDevice.on("error", (err) => setStatus("Device error: " + err.message));
-      twilioDevice.register();
+    // Create and store connection immediately
+    const conn = twilioDevice.connect({ params: { To: phoneNumber } });
+    connectionRef.current = conn;
 
-    } catch (err) {
-      console.error("Token fetch or device init failed:", err);
-      setStatus("Error: " + err.message);
-    }
+    conn.on("accept", () => setStatus("Call connected"));
+    conn.on("disconnect", () => setStatus("Call ended"));
+    conn.on("error", (err) => setStatus(`Call failed: ${err.message}`));
   };
 
   const hangup = () => {
-    const conn = connectionRef.current;
-    if (conn) {
-      conn.disconnect();
+    if (connectionRef.current) {
+      connectionRef.current.disconnect();
       connectionRef.current = null;
       setStatus("Call ended (hung up)");
     }
