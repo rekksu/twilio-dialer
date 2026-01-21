@@ -1,24 +1,23 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { Device } from "@twilio/voice-sdk";
 import axios from "axios";
 
-// Your Cloud Function that issues the Twilio token
 const CLOUD_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 
-// Your TwiML Bin URL
+// Your TwiML Bin URL here
 const TWIML_BIN_URL = "https://handler.twilio.com/twiml/EH36ed64a3f2bb6c5d121d1ab114cc0d53";
 
 export default function App() {
-  const [status, setStatus] = useState("Initializing...");
+  const [status, setStatus] = useState("Click 'Start Call' to initialize");
   const [device, setDevice] = useState(null);
   const [connection, setConnection] = useState(null);
 
-  // Get dynamic number from URL
+  // Get dynamic number from URL query string
   const urlParams = new URLSearchParams(window.location.search);
-  const toNumber = urlParams.get("to"); // ?to=+639215991234
+  const toNumber = urlParams.get("to"); // example: ?to=+639215991234
 
-  // Check microphone permission
+  // Check microphone access
   const checkMicPermission = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -32,9 +31,10 @@ export default function App() {
     }
   };
 
+  // Start the call
   const startCall = async () => {
     if (!toNumber) {
-      setStatus("No number provided in ?to=");
+      setStatus("No phone number provided in ?to= parameter");
       return;
     }
 
@@ -46,27 +46,38 @@ export default function App() {
 
       const res = await axios.get(`${CLOUD_FUNCTION_URL}?identity=agent`);
       const token = res.data.token;
-      console.log("Twilio token fetched:", token);
 
+      console.log("Twilio token fetched:", token);
       setStatus("Initializing Twilio Device…");
 
       const twilioDevice = new Device(token, { enableRingingState: true });
 
-      // Log events for debugging
-      ["ready", "registered", "error", "offline", "connect", "disconnect"].forEach(evt => {
+      // Log all events
+      [
+        "ready",
+        "registered",
+        "error",
+        "offline",
+        "connect",
+        "disconnect",
+        "incoming",
+        "cancel",
+        "tokenExpired"
+      ].forEach(evt => {
         twilioDevice.on(evt, (...args) => console.log(evt, args));
       });
 
+      // Register the device
       twilioDevice.register();
 
-      // When device is ready, call TwiML Bin directly
+      // When registered, make the call using TwiML Bin + dynamic number
       twilioDevice.on("registered", () => {
         console.log("Device registered ✅");
         setStatus(`Calling ${toNumber}…`);
 
         const conn = twilioDevice.connect({
-          // Here we pass the TwiML Bin URL with ?To=
-          twimlUrl: `${TWIML_BIN_URL}?To=${encodeURIComponent(toNumber)}`,
+          // Pass the dynamic number to TwiML Bin
+          twimlParams: { To: toNumber },
         });
 
         setConnection(conn);
@@ -77,9 +88,6 @@ export default function App() {
         setStatus("Twilio Device Error: " + err.message);
       });
 
-      twilioDevice.on("connect", () => setStatus("Call connected"));
-      twilioDevice.on("disconnect", () => setStatus("Call ended"));
-
       setDevice(twilioDevice);
 
     } catch (err) {
@@ -88,21 +96,16 @@ export default function App() {
     }
   };
 
+  // Hang up
   const hangup = () => {
     if (connection) connection.disconnect();
     if (device) device.destroy();
     setStatus("Call ended");
   };
 
-  // Auto-start call on page load if ?to= exists
-  useEffect(() => {
-    startCall();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   return (
     <div style={{ textAlign: "center", padding: "20px" }}>
-      <h2>Twilio Web Dialer (Direct TwiML Bin)</h2>
+      <h2>Twilio Web Dialer (Dynamic Number via TwiML Bin)</h2>
       <p>{status}</p>
       <button onClick={startCall} style={{ padding: "10px 16px", marginRight: 10 }}>
         Start Call
