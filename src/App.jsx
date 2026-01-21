@@ -142,116 +142,168 @@ export default function App() {
     setStatus("Call ended");
   };
 
+  const redial = () => {
+    hangup();
+    setTimeout(() => {
+      startCall();
+    }, 500);
+  };
+
   return (
     <div style={{ 
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      minHeight: "100vh",
+      width: "100%",
+      height: "100vh",
       background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
       fontFamily: "system-ui, -apple-system, sans-serif",
-      padding: "20px"
+      display: "flex",
+      flexDirection: "column",
+      overflow: "hidden"
     }}>
+      {/* Status Bar */}
       <div style={{
-        width: "360px",
-        background: "white",
-        borderRadius: "30px",
-        padding: "40px 30px",
-        boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
-        textAlign: "center"
+        padding: "20px",
+        background: "rgba(255,255,255,0.1)",
+        backdropFilter: "blur(10px)",
+        color: "white",
+        textAlign: "center",
+        fontSize: "14px",
+        fontWeight: "500"
+      }}>
+        {status}
+      </div>
+
+      {/* Main Content */}
+      <div style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px"
       }}>
         {/* Status Indicator */}
         <div style={{
-          width: "80px",
-          height: "80px",
-          margin: "0 auto 20px",
-          background: isConnected ? "#4CAF50" : "#666",
+          width: "100px",
+          height: "100px",
+          margin: "0 auto 30px",
+          background: isConnected ? "#4CAF50" : "rgba(255,255,255,0.2)",
           borderRadius: "50%",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: "36px",
-          animation: isConnected ? "pulse 2s infinite" : "none"
+          fontSize: "48px",
+          animation: isConnected ? "pulse 2s infinite" : "none",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.2)"
         }}>
           {isConnected ? "📞" : "📴"}
         </div>
 
         {/* Phone Number Display */}
         <div style={{
-          fontSize: "24px",
-          fontWeight: "600",
-          color: "#333",
-          marginBottom: "10px",
-          wordBreak: "break-all"
+          fontSize: "32px",
+          fontWeight: "300",
+          color: "white",
+          marginBottom: "15px",
+          wordBreak: "break-all",
+          textAlign: "center"
         }}>
           {phoneNumber || "No number"}
         </div>
 
-        {/* Status Text */}
+        {/* Call Duration */}
         <div style={{
-          fontSize: "16px",
-          color: "#666",
-          marginBottom: "15px",
-          minHeight: "24px"
+          fontSize: "48px",
+          fontWeight: "200",
+          color: isConnected ? "#fff" : "rgba(255,255,255,0.5)",
+          marginBottom: "60px",
+          fontVariantNumeric: "tabular-nums"
         }}>
-          {status}
+          {formatTime(callDuration)}
         </div>
 
-        {/* Call Duration */}
-        {isConnected && (
-          <div style={{
-            fontSize: "32px",
-            fontWeight: "300",
-            color: "#4CAF50",
-            marginBottom: "30px",
-            fontVariantNumeric: "tabular-nums"
-          }}>
-            {formatTime(callDuration)}
-          </div>
-        )}
+        {/* Action Buttons */}
+        <div style={{
+          display: "flex",
+          gap: "40px",
+          alignItems: "center",
+          justifyContent: "center"
+        }}>
+          {/* Redial Button */}
+          <button 
+            onClick={redial}
+            disabled={connection || !phoneNumber}
+            style={{
+              width: "70px",
+              height: "70px",
+              borderRadius: "50%",
+              border: "none",
+              background: (!connection && phoneNumber) ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.1)",
+              color: "white",
+              fontSize: "32px",
+              cursor: (!connection && phoneNumber) ? "pointer" : "not-allowed",
+              boxShadow: (!connection && phoneNumber) ? "0 4px 15px rgba(255,255,255,0.2)" : "none",
+              transition: "all 0.3s ease",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+            onMouseDown={(e) => {
+              if (!connection && phoneNumber) {
+                e.currentTarget.style.transform = "scale(0.95)";
+              }
+            }}
+            onMouseUp={(e) => {
+              e.currentTarget.style.transform = "scale(1)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "scale(1)";
+            }}
+          >
+            🔄
+          </button>
 
-        {/* Hang Up Button */}
-        <button 
-          onClick={hangup}
-          disabled={!connection}
-          style={{
-            width: "80px",
-            height: "80px",
-            borderRadius: "50%",
-            border: "none",
-            background: connection ? "#f44336" : "#ccc",
-            color: "white",
-            fontSize: "36px",
-            cursor: connection ? "pointer" : "not-allowed",
-            boxShadow: connection ? "0 4px 15px rgba(244, 67, 54, 0.4)" : "none",
-            transition: "all 0.3s ease",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            margin: "20px auto 0"
-          }}
-          onMouseDown={(e) => {
-            if (connection) {
-              e.currentTarget.style.transform = "scale(0.95)";
-            }
-          }}
-          onMouseUp={(e) => {
-            e.currentTarget.style.transform = "scale(1)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = "scale(1)";
-          }}
-        >
-          ✖️
-        </button>
-
-        <style>{`
-          @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-          }
-        `}</style>
+          {/* Hang Up Button */}
+          <button 
+            onClick={hangup}
+            disabled={!connection}
+            style={{
+              width: "80px",
+              height: "80px",
+              borderRadius: "50%",
+              border: "none",
+              background: connection ? "#f44336" : "rgba(255,255,255,0.1)",
+              color: "white",
+              fontSize: "40px",
+              cursor: connection ? "pointer" : "not-allowed",
+              boxShadow: connection ? "0 6px 20px rgba(244, 67, 54, 0.5)" : "none",
+              transition: "all 0.3s ease",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+            onMouseDown={(e) => {
+              if (connection) {
+                e.currentTarget.style.transform = "scale(0.95)";
+              }
+            }}
+            onMouseUp={(e) => {
+              e.currentTarget.style.transform = "scale(1)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "scale(1)";
+            }}
+          >
+            ✖️
+          </button>
+        </div>
       </div>
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.05); }
+        }
+      `}</style>
     </div>
   );
 }
