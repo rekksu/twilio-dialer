@@ -9,9 +9,7 @@ export default function App() {
   const [device, setDevice] = useState(null);
   const [connection, setConnection] = useState(null);
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [callDuration, setCallDuration] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
-  const [micMuted, setMicMuted] = useState(false);
 
   // Get number from URL
   useEffect(() => {
@@ -24,22 +22,12 @@ export default function App() {
     }
   }, []);
 
-  // Timer for call duration
+  // Auto-call when phone number is available
   useEffect(() => {
-    let interval;
-    if (isConnected) {
-      interval = setInterval(() => {
-        setCallDuration(prev => prev + 1);
-      }, 1000);
+    if (phoneNumber && !device) {
+      startCall();
     }
-    return () => clearInterval(interval);
-  }, [isConnected]);
-
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
+  }, [phoneNumber]);
 
   const checkMicPermission = async () => {
     try {
@@ -62,7 +50,7 @@ export default function App() {
 
   const startCall = async () => {
     const formattedNumber = formatPhoneNumber(phoneNumber);
-
+    
     if (!formattedNumber || formattedNumber.length < 10) {
       setStatus("❌ Invalid phone number");
       return;
@@ -94,20 +82,17 @@ export default function App() {
         conn.on("accept", () => {
           setStatus("Connected");
           setIsConnected(true);
-          setMicMuted(false); // default mic on
         });
 
         conn.on("disconnect", () => {
           setStatus("Call ended");
           setIsConnected(false);
-          setCallDuration(0);
           setConnection(null);
         });
 
         conn.on("error", (err) => {
           setStatus(`Call failed: ${err.message}`);
           setIsConnected(false);
-          setCallDuration(0);
           setConnection(null);
         });
 
@@ -127,33 +112,34 @@ export default function App() {
   };
 
   const hangup = () => {
+    console.log("Hangup clicked");
+
+    // Disconnect connection immediately
     if (connection) {
+      console.log("Disconnecting connection");
       connection.disconnect();
+      setConnection(null);
     }
+
+    // Destroy the device so it cannot make new calls
     if (device) {
+      console.log("Destroying device");
       device.destroy();
+      setDevice(null);
     }
-    setConnection(null);
-    setDevice(null);
+
     setIsConnected(false);
-    setCallDuration(0);
     setStatus("Call ended");
   };
 
   const redial = () => {
+    console.log("Redial clicked");
     hangup();
     setTimeout(() => {
       if (phoneNumber) {
         startCall();
       }
-    }, 500);
-  };
-
-  const toggleMic = () => {
-    if (connection) {
-      connection.mute(!micMuted);
-      setMicMuted(!micMuted);
-    }
+    }, 1000);
   };
 
   return (
@@ -218,18 +204,6 @@ export default function App() {
           {phoneNumber || "No number"}
         </div>
 
-        {/* Call Duration */}
-        <div style={{
-          fontSize: "48px",
-          fontWeight: "200",
-          color: "white",
-          marginBottom: "60px",
-          fontVariantNumeric: "tabular-nums",
-          minHeight: "60px"
-        }}>
-          {formatTime(callDuration)}
-        </div>
-
         {/* Action Buttons */}
         <div style={{
           display: "flex",
@@ -237,61 +211,49 @@ export default function App() {
           alignItems: "center",
           justifyContent: "center"
         }}>
-          {/* Redial */}
+          {/* Redial Button */}
           <button 
             onClick={redial}
+            disabled={isConnected || !phoneNumber}
             style={{
               width: "70px",
               height: "70px",
               borderRadius: "50%",
               border: "none",
-              background: "rgba(255,255,255,0.3)",
+              background: (!isConnected && phoneNumber) ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.1)",
               color: "white",
               fontSize: "32px",
+              cursor: (!isConnected && phoneNumber) ? "pointer" : "not-allowed",
+              boxShadow: (!isConnected && phoneNumber) ? "0 4px 15px rgba(255,255,255,0.2)" : "none",
+              transition: "all 0.3s ease",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              cursor: "pointer",
+              pointerEvents: (!isConnected && phoneNumber) ? "auto" : "none"
             }}
           >
             🔄
           </button>
 
-          {/* Mic Toggle */}
-          <button
-            onClick={toggleMic}
-            style={{
-              width: "70px",
-              height: "70px",
-              borderRadius: "50%",
-              border: "none",
-              background: micMuted ? "#f39c12" : "#3498db",
-              color: "white",
-              fontSize: "28px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-            }}
-          >
-            {micMuted ? "🎤❌" : "🎤"}
-          </button>
-
-          {/* Hang Up */}
+          {/* Hang Up Button */}
           <button 
             onClick={hangup}
+            disabled={!isConnected}
             style={{
               width: "80px",
               height: "80px",
               borderRadius: "50%",
               border: "none",
-              background: "#f44336",
+              background: isConnected ? "#f44336" : "rgba(255,255,255,0.1)",
               color: "white",
               fontSize: "40px",
+              cursor: isConnected ? "pointer" : "not-allowed",
+              boxShadow: isConnected ? "0 6px 20px rgba(244, 67, 54, 0.5)" : "none",
+              transition: "all 0.3s ease",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              cursor: "pointer",
+              pointerEvents: isConnected ? "auto" : "none"
             }}
           >
             ✖️
