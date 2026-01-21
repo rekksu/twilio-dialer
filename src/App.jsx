@@ -1,34 +1,61 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Device } from "@twilio/voice-sdk";
 
 const CLOUD_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 
 export default function App() {
-  const [status, setStatus] = useState("Enter a phone number and click 'Start Call'");
+  const [status, setStatus] = useState("Initializing...");
   const [device, setDevice] = useState(null);
   const [connection, setConnection] = useState(null);
   const [phoneNumber, setPhoneNumber] = useState("");
+  const [callDuration, setCallDuration] = useState(0);
+  const [isConnected, setIsConnected] = useState(false);
 
-  // Get number from URL or use manual input
-  const urlParams = new URLSearchParams(window.location.search);
-  const urlNumber = urlParams.get("to");
-
-  React.useEffect(() => {
+  // Get number from URL
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlNumber = urlParams.get("to");
     if (urlNumber) {
       setPhoneNumber(urlNumber);
+    } else {
+      setStatus("❌ No phone number provided in URL (?to=+1234567890)");
     }
-  }, [urlNumber]);
+  }, []);
+
+  // Timer for call duration
+  useEffect(() => {
+    let interval;
+    if (isConnected) {
+      interval = setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+    } else {
+      setCallDuration(0);
+    }
+    return () => clearInterval(interval);
+  }, [isConnected]);
+
+  // Auto-call when phone number is available
+  useEffect(() => {
+    if (phoneNumber && !device) {
+      startCall();
+    }
+  }, [phoneNumber]);
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   const checkMicPermission = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach(track => track.stop());
-      console.log("✅ Microphone access granted");
       return true;
     } catch (err) {
-      console.error("❌ Microphone access denied", err);
-      setStatus("❌ Microphone access denied. Please allow microphone and refresh.");
+      setStatus("❌ Microphone access denied");
       return false;
     }
   };
@@ -45,7 +72,7 @@ export default function App() {
     const formattedNumber = formatPhoneNumber(phoneNumber);
     
     if (!formattedNumber || formattedNumber.length < 10) {
-      setStatus("❌ Please enter a valid phone number (e.g., +639215991234)");
+      setStatus("❌ Invalid phone number");
       return;
     }
 
@@ -53,14 +80,11 @@ export default function App() {
     if (!micAllowed) return;
 
     try {
-      setStatus("🔄 Fetching Twilio token…");
+      setStatus("Connecting...");
 
       const res = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
       const data = await res.json();
       const token = data.token;
-
-      console.log("✅ Token received");
-      setStatus("🔄 Initializing device…");
 
       const twilioDevice = new Device(token, { 
         enableRingingState: true,
@@ -69,46 +93,39 @@ export default function App() {
       });
 
       twilioDevice.on("registered", () => {
-        console.log("✅ Device registered");
-        setStatus(`📞 Calling ${formattedNumber}…`);
+        setStatus("Calling...");
 
         const conn = twilioDevice.connect({
           params: { To: formattedNumber }
         });
 
         conn.on("accept", () => {
-          console.log("✅ Call connected!");
-          setStatus(`✅ Connected to ${formattedNumber}`);
+          setStatus("Connected");
+          setIsConnected(true);
         });
 
         conn.on("disconnect", () => {
-          console.log("📴 Call disconnected");
           setStatus("Call ended");
+          setIsConnected(false);
         });
 
         conn.on("error", (err) => {
-          console.error("❌ Call error:", err);
-          setStatus(`❌ Call failed: ${err.message}`);
-          
-          if (err.code === 31005) {
-            setStatus("❌ Connection failed. Check: 1) TwiML Bin config, 2) Phone number is verified (trial accounts), 3) Number format is +[country][number]");
-          }
+          setStatus(`Call failed: ${err.message}`);
+          setIsConnected(false);
         });
 
         setConnection(conn);
       });
 
       twilioDevice.on("error", (err) => {
-        console.error("❌ Device error:", err);
-        setStatus(`❌ Device error: ${err.message}`);
+        setStatus(`Error: ${err.message}`);
       });
 
       twilioDevice.register();
       setDevice(twilioDevice);
 
     } catch (err) {
-      console.error("❌ Failed to start call:", err);
-      setStatus(`❌ Error: ${err.message}`);
+      setStatus(`Error: ${err.message}`);
     }
   };
 
@@ -121,100 +138,119 @@ export default function App() {
       device.destroy();
       setDevice(null);
     }
+    setIsConnected(false);
     setStatus("Call ended");
   };
 
   return (
     <div style={{ 
-      maxWidth: "500px", 
-      margin: "50px auto", 
-      padding: "30px", 
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      minHeight: "100vh",
+      background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
       fontFamily: "system-ui, -apple-system, sans-serif",
-      border: "1px solid #ddd",
-      borderRadius: "8px",
-      boxShadow: "0 2px 8px rgba(0,0,0,0.1)"
+      padding: "20px"
     }}>
-      <h2 style={{ marginTop: 0 }}>🌐 Twilio Web Dialer</h2>
-      
-      <div style={{ marginBottom: "20px" }}>
-        <label style={{ display: "block", marginBottom: "8px", fontWeight: "500" }}>
-          Phone Number:
-        </label>
-        <input
-          type="text"
-          value={phoneNumber}
-          onChange={(e) => setPhoneNumber(e.target.value)}
-          placeholder="+639215991234"
-          style={{
-            width: "100%",
-            padding: "10px",
-            fontSize: "16px",
-            border: "1px solid #ccc",
-            borderRadius: "4px",
-            boxSizing: "border-box"
-          }}
-        />
-        <small style={{ color: "#666", display: "block", marginTop: "5px" }}>
-          Format: +[country code][number] (e.g., +639215991234)
-        </small>
-      </div>
-
-      <div style={{ 
-        padding: "15px", 
-        background: "#f5f5f5", 
-        borderRadius: "4px",
-        marginBottom: "20px",
-        minHeight: "50px",
-        fontSize: "14px"
+      <div style={{
+        width: "360px",
+        background: "white",
+        borderRadius: "30px",
+        padding: "40px 30px",
+        boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+        textAlign: "center"
       }}>
-        {status}
-      </div>
+        {/* Status Indicator */}
+        <div style={{
+          width: "80px",
+          height: "80px",
+          margin: "0 auto 20px",
+          background: isConnected ? "#4CAF50" : "#666",
+          borderRadius: "50%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: "36px",
+          animation: isConnected ? "pulse 2s infinite" : "none"
+        }}>
+          {isConnected ? "📞" : "📴"}
+        </div>
 
-      <div style={{ display: "flex", gap: "10px" }}>
-        <button 
-          onClick={startCall}
-          disabled={!phoneNumber || connection}
-          style={{
-            flex: 1,
-            padding: "12px",
-            fontSize: "16px",
-            fontWeight: "500",
-            background: connection ? "#ccc" : "#4CAF50",
-            color: "white",
-            border: "none",
-            borderRadius: "4px",
-            cursor: connection ? "not-allowed" : "pointer"
-          }}
-        >
-          📞 Start Call
-        </button>
+        {/* Phone Number Display */}
+        <div style={{
+          fontSize: "24px",
+          fontWeight: "600",
+          color: "#333",
+          marginBottom: "10px",
+          wordBreak: "break-all"
+        }}>
+          {phoneNumber || "No number"}
+        </div>
+
+        {/* Status Text */}
+        <div style={{
+          fontSize: "16px",
+          color: "#666",
+          marginBottom: "15px",
+          minHeight: "24px"
+        }}>
+          {status}
+        </div>
+
+        {/* Call Duration */}
+        {isConnected && (
+          <div style={{
+            fontSize: "32px",
+            fontWeight: "300",
+            color: "#4CAF50",
+            marginBottom: "30px",
+            fontVariantNumeric: "tabular-nums"
+          }}>
+            {formatTime(callDuration)}
+          </div>
+        )}
+
+        {/* Hang Up Button */}
         <button 
           onClick={hangup}
           disabled={!connection}
           style={{
-            flex: 1,
-            padding: "12px",
-            fontSize: "16px",
-            fontWeight: "500",
-            background: !connection ? "#ccc" : "#f44336",
-            color: "white",
+            width: "80px",
+            height: "80px",
+            borderRadius: "50%",
             border: "none",
-            borderRadius: "4px",
-            cursor: !connection ? "not-allowed" : "pointer"
+            background: connection ? "#f44336" : "#ccc",
+            color: "white",
+            fontSize: "36px",
+            cursor: connection ? "pointer" : "not-allowed",
+            boxShadow: connection ? "0 4px 15px rgba(244, 67, 54, 0.4)" : "none",
+            transition: "all 0.3s ease",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            margin: "20px auto 0"
+          }}
+          onMouseDown={(e) => {
+            if (connection) {
+              e.currentTarget.style.transform = "scale(0.95)";
+            }
+          }}
+          onMouseUp={(e) => {
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = "scale(1)";
           }}
         >
-          📴 Hang Up
+          ✖️
         </button>
-      </div>
 
-      <div style={{ marginTop: "20px", fontSize: "13px", color: "#666" }}>
-        <strong>Troubleshooting 31005 Error:</strong>
-        <ul style={{ marginTop: "10px", paddingLeft: "20px" }}>
-          <li>Verify TwiML Bin uses correct callerId</li>
-          <li>Check phone number format (+country code)</li>
-          <li>For trial accounts: verify destination number</li>
-          <li>Check browser console for detailed logs</li>
-        </ul>
+        <style>{`
+          @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+          }
+        `}</style>
       </div>
     </div>
   );
