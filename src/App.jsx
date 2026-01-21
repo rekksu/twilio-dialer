@@ -31,18 +31,9 @@ export default function App() {
       interval = setInterval(() => {
         setCallDuration(prev => prev + 1);
       }, 1000);
-    } else {
-      setCallDuration(0);
     }
     return () => clearInterval(interval);
   }, [isConnected]);
-
-  // Auto-call when phone number is available
-  useEffect(() => {
-    if (phoneNumber && !device) {
-      startCall();
-    }
-  }, [phoneNumber]);
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -103,18 +94,21 @@ export default function App() {
         conn.on("accept", () => {
           setStatus("Connected");
           setIsConnected(true);
+          setMicMuted(false); // default mic on
         });
 
         conn.on("disconnect", () => {
           setStatus("Call ended");
           setIsConnected(false);
           setCallDuration(0);
+          setConnection(null);
         });
 
         conn.on("error", (err) => {
           setStatus(`Call failed: ${err.message}`);
           setIsConnected(false);
           setCallDuration(0);
+          setConnection(null);
         });
 
         setConnection(conn);
@@ -135,12 +129,12 @@ export default function App() {
   const hangup = () => {
     if (connection) {
       connection.disconnect();
-      setConnection(null);
     }
     if (device) {
       device.destroy();
-      setDevice(null);
     }
+    setConnection(null);
+    setDevice(null);
     setIsConnected(false);
     setCallDuration(0);
     setStatus("Call ended");
@@ -152,13 +146,14 @@ export default function App() {
       if (phoneNumber) {
         startCall();
       }
-    }, 1000);
+    }, 500);
   };
 
   const toggleMic = () => {
-    if (!connection) return;
-    connection.mute(!micMuted);
-    setMicMuted(!micMuted);
+    if (connection) {
+      connection.mute(!micMuted);
+      setMicMuted(!micMuted);
+    }
   };
 
   return (
@@ -245,21 +240,18 @@ export default function App() {
           {/* Redial */}
           <button 
             onClick={redial}
-            disabled={isConnected || !phoneNumber}
             style={{
               width: "70px",
               height: "70px",
               borderRadius: "50%",
               border: "none",
-              background: (!isConnected && phoneNumber) ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.1)",
+              background: "rgba(255,255,255,0.3)",
               color: "white",
               fontSize: "32px",
-              cursor: (!isConnected && phoneNumber) ? "pointer" : "not-allowed",
-              boxShadow: (!isConnected && phoneNumber) ? "0 4px 15px rgba(255,255,255,0.2)" : "none",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              pointerEvents: (!isConnected && phoneNumber) ? "auto" : "none"
+              cursor: "pointer",
             }}
           >
             🔄
@@ -268,19 +260,18 @@ export default function App() {
           {/* Mic Toggle */}
           <button
             onClick={toggleMic}
-            disabled={!isConnected}
             style={{
               width: "70px",
               height: "70px",
               borderRadius: "50%",
               border: "none",
-              background: isConnected ? (micMuted ? "#f39c12" : "#3498db") : "rgba(255,255,255,0.1)",
+              background: micMuted ? "#f39c12" : "#3498db",
               color: "white",
               fontSize: "28px",
-              cursor: isConnected ? "pointer" : "not-allowed",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              cursor: "pointer",
             }}
           >
             {micMuted ? "🎤❌" : "🎤"}
@@ -289,20 +280,18 @@ export default function App() {
           {/* Hang Up */}
           <button 
             onClick={hangup}
-            disabled={!isConnected}
             style={{
               width: "80px",
               height: "80px",
               borderRadius: "50%",
               border: "none",
-              background: isConnected ? "#f44336" : "rgba(255,255,255,0.1)",
+              background: "#f44336",
               color: "white",
               fontSize: "40px",
-              cursor: isConnected ? "pointer" : "not-allowed",
-              boxShadow: isConnected ? "0 6px 20px rgba(244, 67, 54, 0.5)" : "none",
               display: "flex",
               alignItems: "center",
-              justifyContent: "center"
+              justifyContent: "center",
+              cursor: "pointer",
             }}
           >
             ✖️
