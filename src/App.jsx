@@ -29,62 +29,67 @@ export default function App() {
   };
 
   const startCall = async () => {
-    const micAllowed = await checkMicPermission();
-    if (!micAllowed) return;
+  const micAllowed = await checkMicPermission();
+  if (!micAllowed) return;
 
-    try {
-      setStatus("Fetching Twilio token…");
+  try {
+    setStatus("Fetching Twilio token…");
 
-      const res = await axios.get(`${CLOUD_FUNCTION_URL}?identity=agent`, {
-        timeout: 5000,
-      });
-      const token = res.data.token;
+    const res = await axios.get(`${CLOUD_FUNCTION_URL}?identity=agent`, {
+      timeout: 5000,
+    });
+    const token = res.data.token;
 
-      setStatus("Initializing Twilio Device…");
+    // ✅ Log token in console
+    console.log("Twilio token fetched:", token);
 
-      const twilioDevice = new Device(token, { enableRingingState: true });
+    // Optional: display token in the UI (for debugging only)
+    setStatus("Token fetched! Check console.\nInitializing Twilio Device…");
 
-      // Log all events
-      const events = [
-        "ready",
-        "error",
-        "offline",
-        "connect",
-        "disconnect",
-        "incoming",
-        "cancel",
-        "tokenExpired",
-        "deviceDidReceiveIncoming",
-        "incomingCall"
-      ];
+    const twilioDevice = new Device(token, { enableRingingState: true });
 
-      events.forEach(evt => {
-        twilioDevice.on(evt, (...args) => console.log(evt, args));
-      });
+    // Log all events
+    const events = [
+      "ready",
+      "error",
+      "offline",
+      "connect",
+      "disconnect",
+      "incoming",
+      "cancel",
+      "tokenExpired",
+      "deviceDidReceiveIncoming",
+      "incomingCall"
+    ];
 
-      // When ready, automatically call the number
-      twilioDevice.on("ready", () => {
-        console.log("Device ready ✅");
-        setStatus(`Calling ${toNumber}…`);
-        if (toNumber) {
-          const conn = twilioDevice.connect({ To: toNumber });
-          setConnection(conn);
-        } else {
-          setStatus("Device ready, but no number provided in ?to=");
-        }
-      });
+    events.forEach(evt => {
+      twilioDevice.on(evt, (...args) => console.log(evt, args));
+    });
 
-      twilioDevice.on("error", (err) => {
-        console.error("Twilio Device Error:", err);
-        setStatus("Twilio Device Error: " + err.message);
-      });
+    // When ready, automatically call the number
+    twilioDevice.on("ready", () => {
+      console.log("Device ready ✅");
+      setStatus(`Calling ${toNumber}…`);
+      if (toNumber) {
+        const conn = twilioDevice.connect({ To: toNumber });
+        setConnection(conn);
+      } else {
+        setStatus("Device ready, but no number provided in ?to=");
+      }
+    });
 
-      setDevice(twilioDevice);
-    } catch (err) {
-      console.error("Failed to start call:", err);
-      setStatus("Error: " + err.message);
-    }
-  };
+    twilioDevice.on("error", (err) => {
+      console.error("Twilio Device Error:", err);
+      setStatus("Twilio Device Error: " + err.message);
+    });
+
+    setDevice(twilioDevice);
+  } catch (err) {
+    console.error("Failed to start call:", err);
+    setStatus("Error: " + err.message);
+  }
+};
+
 
   const hangup = () => {
     if (connection) connection.disconnect();
