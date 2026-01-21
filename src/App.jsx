@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Device } from "@twilio/voice-sdk";
-import "./style.css"; // Make sure style.css exists in src/
+import "./style.css";
 
 const CLOUD_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
@@ -18,11 +18,19 @@ export default function App() {
     const urlNumber = urlParams.get("to");
     if (urlNumber) {
       setPhoneNumber(urlNumber);
-      setStatus("Ready to call");
+      setStatus("Ready to call…");
     } else {
       setStatus("❌ No phone number provided in URL (?to=+1234567890)");
     }
   }, []);
+
+  // Start call immediately when phoneNumber is set
+  useEffect(() => {
+    if (phoneNumber) {
+      startCall();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phoneNumber]);
 
   const checkMicPermission = async () => {
     try {
@@ -61,6 +69,7 @@ export default function App() {
 
       twilioDevice.on("registered", () => {
         setStatus(`Calling ${formattedNumber}…`);
+        // Make the call only after device is registered
         const conn = twilioDevice.connect({ params: { To: formattedNumber } });
         setConnection(conn);
 
@@ -88,25 +97,28 @@ export default function App() {
 
       twilioDevice.register();
       setDevice(twilioDevice);
+
     } catch (err) {
       setStatus(`Error: ${err.message}`);
     }
   };
 
   const hangup = () => {
-    if (connection) connection.disconnect();
-    if (device) device.destroy();
+    if (connection) {
+      connection.disconnect();
+      setConnection(null);
+    }
+    if (device) {
+      device.destroy();
+      setDevice(null);
+    }
     setIsConnected(false);
-    setConnection(null);
-    setDevice(null);
     setStatus("Call ended");
   };
 
   const redial = () => {
     hangup();
-    setTimeout(() => {
-      startCall();
-    }, 500);
+    setTimeout(() => startCall(), 500);
   };
 
   return (
