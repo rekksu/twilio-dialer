@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Device } from "@twilio/voice-sdk";
-import "./style.css";
+import "./styles.css";
 
 const CLOUD_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
