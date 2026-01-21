@@ -11,6 +11,7 @@ export default function App() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [callDuration, setCallDuration] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
 
   // Get number from URL
   useEffect(() => {
@@ -70,7 +71,7 @@ export default function App() {
 
   const startCall = async () => {
     const formattedNumber = formatPhoneNumber(phoneNumber);
-    
+
     if (!formattedNumber || formattedNumber.length < 10) {
       setStatus("❌ Invalid phone number");
       return;
@@ -107,11 +108,13 @@ export default function App() {
         conn.on("disconnect", () => {
           setStatus("Call ended");
           setIsConnected(false);
+          setCallDuration(0);
         });
 
         conn.on("error", (err) => {
           setStatus(`Call failed: ${err.message}`);
           setIsConnected(false);
+          setCallDuration(0);
         });
 
         setConnection(conn);
@@ -130,14 +133,11 @@ export default function App() {
   };
 
   const hangup = () => {
-    console.log("Hangup clicked");
     if (connection) {
-      console.log("Disconnecting connection");
       connection.disconnect();
       setConnection(null);
     }
     if (device) {
-      console.log("Destroying device");
       device.destroy();
       setDevice(null);
     }
@@ -147,13 +147,18 @@ export default function App() {
   };
 
   const redial = () => {
-    console.log("Redial clicked");
     hangup();
     setTimeout(() => {
       if (phoneNumber) {
         startCall();
       }
     }, 1000);
+  };
+
+  const toggleMic = () => {
+    if (!connection) return;
+    connection.mute(!micMuted);
+    setMicMuted(!micMuted);
   };
 
   return (
@@ -218,7 +223,7 @@ export default function App() {
           {phoneNumber || "No number"}
         </div>
 
-        {/* Call Duration - Always visible */}
+        {/* Call Duration */}
         <div style={{
           fontSize: "48px",
           fontWeight: "200",
@@ -237,7 +242,7 @@ export default function App() {
           alignItems: "center",
           justifyContent: "center"
         }}>
-          {/* Redial Button */}
+          {/* Redial */}
           <button 
             onClick={redial}
             disabled={isConnected || !phoneNumber}
@@ -251,28 +256,37 @@ export default function App() {
               fontSize: "32px",
               cursor: (!isConnected && phoneNumber) ? "pointer" : "not-allowed",
               boxShadow: (!isConnected && phoneNumber) ? "0 4px 15px rgba(255,255,255,0.2)" : "none",
-              transition: "all 0.3s ease",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               pointerEvents: (!isConnected && phoneNumber) ? "auto" : "none"
             }}
-            onMouseDown={(e) => {
-              if (!isConnected && phoneNumber) {
-                e.currentTarget.style.transform = "scale(0.95)";
-              }
-            }}
-            onMouseUp={(e) => {
-              e.currentTarget.style.transform = "scale(1)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "scale(1)";
-            }}
           >
             🔄
           </button>
 
-          {/* Hang Up Button */}
+          {/* Mic Toggle */}
+          <button
+            onClick={toggleMic}
+            disabled={!isConnected}
+            style={{
+              width: "70px",
+              height: "70px",
+              borderRadius: "50%",
+              border: "none",
+              background: isConnected ? (micMuted ? "#f39c12" : "#3498db") : "rgba(255,255,255,0.1)",
+              color: "white",
+              fontSize: "28px",
+              cursor: isConnected ? "pointer" : "not-allowed",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            {micMuted ? "🎤❌" : "🎤"}
+          </button>
+
+          {/* Hang Up */}
           <button 
             onClick={hangup}
             disabled={!isConnected}
@@ -286,22 +300,9 @@ export default function App() {
               fontSize: "40px",
               cursor: isConnected ? "pointer" : "not-allowed",
               boxShadow: isConnected ? "0 6px 20px rgba(244, 67, 54, 0.5)" : "none",
-              transition: "all 0.3s ease",
               display: "flex",
               alignItems: "center",
-              justifyContent: "center",
-              pointerEvents: isConnected ? "auto" : "none"
-            }}
-            onMouseDown={(e) => {
-              if (isConnected) {
-                e.currentTarget.style.transform = "scale(0.95)";
-              }
-            }}
-            onMouseUp={(e) => {
-              e.currentTarget.style.transform = "scale(1)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "scale(1)";
+              justifyContent: "center"
             }}
           >
             ✖️
