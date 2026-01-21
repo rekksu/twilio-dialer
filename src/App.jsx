@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { Device } from "@twilio/voice-sdk";
-import "./style.css";
 
 const CLOUD_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
@@ -8,8 +7,9 @@ const CLOUD_FUNCTION_URL =
 export default function App() {
   const [status, setStatus] = useState("Initializing...");
   const [device, setDevice] = useState(null);
-  const connectionRef = useRef(null); // store live connection
+  const [connection, setConnection] = useState(null);
   const [phoneNumber, setPhoneNumber] = useState("");
+  const [callDuration, setCallDuration] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
 
   // Get number from URL
@@ -18,17 +18,36 @@ export default function App() {
     const urlNumber = urlParams.get("to");
     if (urlNumber) {
       setPhoneNumber(urlNumber);
-      setStatus("Ready to call…");
     } else {
       setStatus("❌ No phone number provided in URL (?to=+1234567890)");
     }
   }, []);
 
-  // Start call automatically
+  // Timer for call duration
   useEffect(() => {
-    if (phoneNumber) startCall();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let interval;
+    if (isConnected) {
+      interval = setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+    } else {
+      setCallDuration(0);
+    }
+    return () => clearInterval(interval);
+  }, [isConnected]);
+
+  // Auto-call when phone number is available
+  useEffect(() => {
+    if (phoneNumber && !device) {
+      startCall();
+    }
   }, [phoneNumber]);
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   const checkMicPermission = async () => {
     try {
@@ -43,13 +62,16 @@ export default function App() {
 
   const formatPhoneNumber = (num) => {
     let cleaned = num.replace(/[\s\-\(\)]/g, "");
-    if (!cleaned.startsWith("+")) cleaned = "+" + cleaned;
+    if (!cleaned.startsWith("+")) {
+      cleaned = "+" + cleaned;
+    }
     return cleaned;
   };
 
   const startCall = async () => {
     const formattedNumber = formatPhoneNumber(phoneNumber);
-    if (!formattedNumber) {
+    
+    if (!formattedNumber || formattedNumber.length < 10) {
       setStatus("❌ Invalid phone number");
       return;
     }
@@ -58,40 +80,45 @@ export default function App() {
     if (!micAllowed) return;
 
     try {
-      setStatus("Fetching Twilio token…");
+      setStatus("Connecting...");
+
       const res = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
       const data = await res.json();
       const token = data.token;
 
-      const twilioDevice = new Device(token, { enableRingingState: true });
+      const twilioDevice = new Device(token, { 
+        enableRingingState: true,
+        codecPreferences: ["opus", "pcmu"],
+        logLevel: 1
+      });
 
       twilioDevice.on("registered", () => {
-        setStatus(`Calling ${formattedNumber}…`);
+        setStatus("Calling...");
 
-        // Store connection in ref
-        const conn = twilioDevice.connect({ params: { To: formattedNumber } });
-        connectionRef.current = conn;
+        const conn = twilioDevice.connect({
+          params: { To: formattedNumber }
+        });
 
         conn.on("accept", () => {
-          setStatus("Call connected");
+          setStatus("Connected");
           setIsConnected(true);
         });
 
         conn.on("disconnect", () => {
           setStatus("Call ended");
           setIsConnected(false);
-          connectionRef.current = null;
         });
 
         conn.on("error", (err) => {
           setStatus(`Call failed: ${err.message}`);
           setIsConnected(false);
-          connectionRef.current = null;
         });
+
+        setConnection(conn);
       });
 
       twilioDevice.on("error", (err) => {
-        setStatus(`Device error: ${err.message}`);
+        setStatus(`Error: ${err.message}`);
       });
 
       twilioDevice.register();
@@ -103,9 +130,9 @@ export default function App() {
   };
 
   const hangup = () => {
-    if (connectionRef.current) {
-      connectionRef.current.disconnect();
-      connectionRef.current = null;
+    if (connection) {
+      connection.disconnect();
+      setConnection(null);
     }
     if (device) {
       device.destroy();
@@ -115,26 +142,144 @@ export default function App() {
     setStatus("Call ended");
   };
 
-  const redial = () => {
-    hangup();
-    setTimeout(() => startCall(), 500);
-  };
-
   return (
-    <div className="container">
-      <h2 className="title">Twilio Web Dialer</h2>
+    <div style={{
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      minHeight: "100vh",
+      background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+      fontFamily: "Inter, system-ui, -apple-system, sans-serif",
+      padding: "20px"
+    }}>
+      <div style={{
+        width: "400px",
+        background: "#fff",
+        borderRadius: "30px",
+        padding: "50px 30px 40px",
+        boxShadow: "0 25px 60px rgba(0,0,0,0.25)",
+        textAlign: "center",
+        transition: "all 0.3s ease"
+      }}>
+        {/* Status Indicator */}
+        <div style={{
+          position: "relative",
+          width: "90px",
+          height: "90px",
+          margin: "0 auto 25px",
+          background: isConnected ? "#4CAF50" : "#ccc",
+          borderRadius: "50%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: "38px",
+          color: "#fff",
+          boxShadow: "0 0 15px rgba(0,0,0,0.2)",
+        }}>
+          {isConnected ? "📞" : "📴"}
+          {isConnected && (
+            <span style={{
+              content: '""',
+              position: "absolute",
+              top: "-10px",
+              left: "-10px",
+              width: "110px",
+              height: "110px",
+              borderRadius: "50%",
+              border: "3px solid rgba(76, 175, 80, 0.5)",
+              animation: "pulse-ring 1.5s infinite"
+            }} />
+          )}
+        </div>
 
-      <div className="status">{status}</div>
+        {/* Phone Number Display */}
+        <div style={{
+          fontSize: "24px",
+          fontWeight: "600",
+          color: "#333",
+          marginBottom: "10px",
+          wordBreak: "break-all"
+        }}>
+          {phoneNumber || "No number"}
+        </div>
 
-      <div className="phone-number">{phoneNumber || "No number"}</div>
+        {/* Status Text */}
+        <div style={{
+          fontSize: "16px",
+          color: "#666",
+          marginBottom: "20px",
+          minHeight: "24px"
+        }}>
+          {status}
+        </div>
 
-      <div className="buttons">
-        <button className="redial-btn" onClick={redial} disabled={isConnected || !phoneNumber}>
-          🔄 Redial
+        {/* Call Duration */}
+        {isConnected && (
+          <div style={{
+            fontSize: "32px",
+            fontWeight: "500",
+            color: "#4CAF50",
+            marginBottom: "30px",
+            fontVariantNumeric: "tabular-nums"
+          }}>
+            {formatTime(callDuration)}
+          </div>
+        )}
+
+        {/* Hang Up Button */}
+        <button 
+          onClick={hangup}
+          disabled={!connection}
+          style={{
+            width: "90px",
+            height: "90px",
+            borderRadius: "50%",
+            border: "none",
+            background: connection ? "#f44336" : "#ccc",
+            color: "white",
+            fontSize: "38px",
+            cursor: connection ? "pointer" : "not-allowed",
+            boxShadow: connection ? "0 6px 20px rgba(244, 67, 54, 0.5)" : "none",
+            transition: "all 0.3s ease",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            margin: "0 auto"
+          }}
+          onMouseDown={(e) => {
+            if (connection) e.currentTarget.style.transform = "scale(0.95)";
+          }}
+          onMouseUp={(e) => {
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+        >
+          ✖️
         </button>
-        <button className="hangup-btn" onClick={hangup} disabled={!isConnected}>
-          📴 Hang Up
-        </button>
+
+        {/* Keyframes */}
+        <style>{`
+          @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+          }
+          @keyframes pulse-ring {
+            0% {
+              transform: scale(0.9);
+              opacity: 0.6;
+            }
+            70% {
+              transform: scale(1.2);
+              opacity: 0;
+            }
+            100% {
+              transform: scale(0.9);
+              opacity: 0;
+            }
+          }
+        `}</style>
       </div>
     </div>
   );
