@@ -1,9 +1,12 @@
 import React, { useState } from "react";
-import { Device, VoiceGrant, AccessToken } from "@twilio/voice-sdk";
+import { Device } from "@twilio/voice-sdk";
 import axios from "axios";
 
 const CLOUD_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
+
+// Your TwiML Bin URL here
+const TWIML_BIN_URL = "https://handler.twilio.com/twiml/EH36ed64a3f2bb6c5d121d1ab114cc0d53";
 
 export default function App() {
   const [status, setStatus] = useState("Click 'Start Call' to initialize");
@@ -14,6 +17,7 @@ export default function App() {
   const urlParams = new URLSearchParams(window.location.search);
   const toNumber = urlParams.get("to"); // example: ?to=+639215991234
 
+  // Check microphone access
   const checkMicPermission = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -22,13 +26,12 @@ export default function App() {
       return true;
     } catch (err) {
       console.error("Microphone access denied ❌", err);
-      setStatus(
-        "Microphone access denied. Please allow microphone and refresh page."
-      );
+      setStatus("Microphone access denied. Please allow microphone and refresh page.");
       return false;
     }
   };
 
+  // Start the call
   const startCall = async () => {
     if (!toNumber) {
       setStatus("No phone number provided in ?to= parameter");
@@ -67,11 +70,16 @@ export default function App() {
       // Register the device
       twilioDevice.register();
 
-      // When registered, call the dynamic number
+      // When registered, make the call using TwiML Bin + dynamic number
       twilioDevice.on("registered", () => {
         console.log("Device registered ✅");
         setStatus(`Calling ${toNumber}…`);
-        const conn = twilioDevice.connect({ To: toNumber });
+
+        const conn = twilioDevice.connect({
+          // Pass the dynamic number to TwiML Bin
+          twimlParams: { To: toNumber },
+        });
+
         setConnection(conn);
       });
 
@@ -88,6 +96,7 @@ export default function App() {
     }
   };
 
+  // Hang up
   const hangup = () => {
     if (connection) connection.disconnect();
     if (device) device.destroy();
@@ -96,12 +105,9 @@ export default function App() {
 
   return (
     <div style={{ textAlign: "center", padding: "20px" }}>
-      <h2>Twilio Web Dialer (voiceOutbound)</h2>
+      <h2>Twilio Web Dialer (Dynamic Number via TwiML Bin)</h2>
       <p>{status}</p>
-      <button
-        onClick={startCall}
-        style={{ padding: "10px 16px", marginRight: 10 }}
-      >
+      <button onClick={startCall} style={{ padding: "10px 16px", marginRight: 10 }}>
         Start Call
       </button>
       <button onClick={hangup} style={{ padding: "10px 16px" }}>
