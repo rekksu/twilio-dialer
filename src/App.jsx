@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Device } from "@twilio/voice-sdk";
 import "./style.css";
 
@@ -8,7 +8,7 @@ const CLOUD_FUNCTION_URL =
 export default function App() {
   const [status, setStatus] = useState("Initializing...");
   const [device, setDevice] = useState(null);
-  const [connection, setConnection] = useState(null);
+  const connectionRef = useRef(null); // store live connection
   const [phoneNumber, setPhoneNumber] = useState("");
   const [isConnected, setIsConnected] = useState(false);
 
@@ -24,11 +24,9 @@ export default function App() {
     }
   }, []);
 
-  // Start call immediately when phoneNumber is set
+  // Start call automatically
   useEffect(() => {
-    if (phoneNumber) {
-      startCall();
-    }
+    if (phoneNumber) startCall();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phoneNumber]);
 
@@ -69,9 +67,10 @@ export default function App() {
 
       twilioDevice.on("registered", () => {
         setStatus(`Calling ${formattedNumber}…`);
-        // Make the call only after device is registered
+
+        // Store connection in ref
         const conn = twilioDevice.connect({ params: { To: formattedNumber } });
-        setConnection(conn);
+        connectionRef.current = conn;
 
         conn.on("accept", () => {
           setStatus("Call connected");
@@ -81,13 +80,13 @@ export default function App() {
         conn.on("disconnect", () => {
           setStatus("Call ended");
           setIsConnected(false);
-          setConnection(null);
+          connectionRef.current = null;
         });
 
         conn.on("error", (err) => {
           setStatus(`Call failed: ${err.message}`);
           setIsConnected(false);
-          setConnection(null);
+          connectionRef.current = null;
         });
       });
 
@@ -104,9 +103,9 @@ export default function App() {
   };
 
   const hangup = () => {
-    if (connection) {
-      connection.disconnect();
-      setConnection(null);
+    if (connectionRef.current) {
+      connectionRef.current.disconnect();
+      connectionRef.current = null;
     }
     if (device) {
       device.destroy();
