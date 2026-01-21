@@ -130,23 +130,30 @@ export default function App() {
   };
 
   const hangup = () => {
+    console.log("Hangup clicked");
     if (connection) {
+      console.log("Disconnecting connection");
       connection.disconnect();
       setConnection(null);
     }
     if (device) {
+      console.log("Destroying device");
       device.destroy();
       setDevice(null);
     }
     setIsConnected(false);
+    setCallDuration(0);
     setStatus("Call ended");
   };
 
   const redial = () => {
+    console.log("Redial clicked");
     hangup();
     setTimeout(() => {
-      startCall();
-    }, 500);
+      if (phoneNumber) {
+        startCall();
+      }
+    }, 1000);
   };
 
   return (
@@ -205,18 +212,20 @@ export default function App() {
           color: "white",
           marginBottom: "15px",
           wordBreak: "break-all",
-          textAlign: "center"
+          textAlign: "center",
+          maxWidth: "90%"
         }}>
           {phoneNumber || "No number"}
         </div>
 
-        {/* Call Duration */}
+        {/* Call Duration - Always visible */}
         <div style={{
           fontSize: "48px",
           fontWeight: "200",
-          color: isConnected ? "#fff" : "rgba(255,255,255,0.5)",
+          color: "white",
           marginBottom: "60px",
-          fontVariantNumeric: "tabular-nums"
+          fontVariantNumeric: "tabular-nums",
+          minHeight: "60px"
         }}>
           {formatTime(callDuration)}
         </div>
@@ -231,24 +240,25 @@ export default function App() {
           {/* Redial Button */}
           <button 
             onClick={redial}
-            disabled={connection || !phoneNumber}
+            disabled={isConnected || !phoneNumber}
             style={{
               width: "70px",
               height: "70px",
               borderRadius: "50%",
               border: "none",
-              background: (!connection && phoneNumber) ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.1)",
+              background: (!isConnected && phoneNumber) ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.1)",
               color: "white",
               fontSize: "32px",
-              cursor: (!connection && phoneNumber) ? "pointer" : "not-allowed",
-              boxShadow: (!connection && phoneNumber) ? "0 4px 15px rgba(255,255,255,0.2)" : "none",
+              cursor: (!isConnected && phoneNumber) ? "pointer" : "not-allowed",
+              boxShadow: (!isConnected && phoneNumber) ? "0 4px 15px rgba(255,255,255,0.2)" : "none",
               transition: "all 0.3s ease",
               display: "flex",
               alignItems: "center",
-              justifyContent: "center"
+              justifyContent: "center",
+              pointerEvents: (!isConnected && phoneNumber) ? "auto" : "none"
             }}
             onMouseDown={(e) => {
-              if (!connection && phoneNumber) {
+              if (!isConnected && phoneNumber) {
                 e.currentTarget.style.transform = "scale(0.95)";
               }
             }}
@@ -265,24 +275,25 @@ export default function App() {
           {/* Hang Up Button */}
           <button 
             onClick={hangup}
-            disabled={!connection}
+            disabled={!isConnected}
             style={{
               width: "80px",
               height: "80px",
               borderRadius: "50%",
               border: "none",
-              background: connection ? "#f44336" : "rgba(255,255,255,0.1)",
+              background: isConnected ? "#f44336" : "rgba(255,255,255,0.1)",
               color: "white",
               fontSize: "40px",
-              cursor: connection ? "pointer" : "not-allowed",
-              boxShadow: connection ? "0 6px 20px rgba(244, 67, 54, 0.5)" : "none",
+              cursor: isConnected ? "pointer" : "not-allowed",
+              boxShadow: isConnected ? "0 6px 20px rgba(244, 67, 54, 0.5)" : "none",
               transition: "all 0.3s ease",
               display: "flex",
               alignItems: "center",
-              justifyContent: "center"
+              justifyContent: "center",
+              pointerEvents: isConnected ? "auto" : "none"
             }}
             onMouseDown={(e) => {
-              if (connection) {
+              if (isConnected) {
                 e.currentTarget.style.transform = "scale(0.95)";
               }
             }}
