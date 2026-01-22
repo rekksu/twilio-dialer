@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Device } from "@twilio/voice-sdk";
+import "./style.css";
 
 const CLOUD_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
@@ -30,19 +31,6 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phoneNumber]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (connection) {
-        connection.disconnect();
-      }
-      if (device) {
-        device.unregister();
-        device.destroy();
-      }
-    };
-  }, [connection, device]);
 
   const checkMicPermission = async () => {
     try {
@@ -81,11 +69,12 @@ export default function App() {
 
       twilioDevice.on("registered", () => {
         setStatus(`Calling ${formattedNumber}…`);
+        // Make the call only after device is registered
         const conn = twilioDevice.connect({ params: { To: formattedNumber } });
         setConnection(conn);
 
         conn.on("accept", () => {
-          setStatus("✅ Call connected");
+          setStatus("Call connected");
           setIsConnected(true);
         });
 
@@ -96,143 +85,58 @@ export default function App() {
         });
 
         conn.on("error", (err) => {
-          setStatus(`❌ Call failed: ${err.message}`);
+          setStatus(`Call failed: ${err.message}`);
           setIsConnected(false);
           setConnection(null);
         });
       });
 
       twilioDevice.on("error", (err) => {
-        setStatus(`❌ Device error: ${err.message}`);
+        setStatus(`Device error: ${err.message}`);
       });
 
       twilioDevice.register();
       setDevice(twilioDevice);
 
     } catch (err) {
-      setStatus(`❌ Error: ${err.message}`);
+      setStatus(`Error: ${err.message}`);
     }
   };
 
   const hangup = () => {
-    setStatus("Ending call...");
-    
     if (connection) {
-      try {
-        connection.disconnect();
-      } catch (err) {
-        console.error("Error disconnecting:", err);
-      }
+      connection.disconnect();
+      setConnection(null);
     }
-    
     if (device) {
-      try {
-        device.unregister();
-        device.destroy();
-      } catch (err) {
-        console.error("Error destroying device:", err);
-      }
+      device.destroy();
+      setDevice(null);
     }
-    
-    setConnection(null);
-    setDevice(null);
     setIsConnected(false);
     setStatus("Call ended");
   };
 
   const redial = () => {
     hangup();
-    setTimeout(() => startCall(), 1000);
+    setTimeout(() => startCall(), 500);
   };
 
   return (
-    <div style={styles.container}>
-      <h2 style={styles.title}>📞 Twilio Web Dialer</h2>
+    <div className="container">
+      <h2 className="title">Twilio Web Dialer</h2>
 
-      <div style={styles.status}>{status}</div>
+      <div className="status">{status}</div>
 
-      <div style={styles.phoneNumber}>{phoneNumber || "No number"}</div>
+      <div className="phone-number">{phoneNumber || "No number"}</div>
 
-      <div style={styles.buttons}>
-        <button 
-          style={{...styles.button, ...styles.redialBtn}} 
-          onClick={redial} 
-          disabled={isConnected || !phoneNumber}
-        >
+      <div className="buttons">
+        <button className="redial-btn" onClick={redial} disabled={isConnected || !phoneNumber}>
           🔄 Redial
         </button>
-        <button 
-          style={{
-            ...styles.button, 
-            ...styles.hangupBtn,
-            ...(isConnected ? {} : styles.disabled)
-          }} 
-          onClick={hangup} 
-          disabled={!isConnected}
-        >
+        <button className="hangup-btn" onClick={hangup} disabled={!isConnected}>
           📴 Hang Up
         </button>
       </div>
     </div>
   );
-}
-
-const styles = {
-  container: {
-    maxWidth: "500px",
-    margin: "50px auto",
-    padding: "30px",
-    backgroundColor: "#fff",
-    borderRadius: "12px",
-    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-    fontFamily: "system-ui, -apple-system, sans-serif"
-  },
-  title: {
-    textAlign: "center",
-    color: "#333",
-    marginBottom: "30px"
-  },
-  status: {
-    padding: "15px",
-    backgroundColor: "#f5f5f5",
-    borderRadius: "8px",
-    textAlign: "center",
-    marginBottom: "20px",
-    fontSize: "16px",
-    color: "#555"
-  },
-  phoneNumber: {
-    textAlign: "center",
-    fontSize: "24px",
-    fontWeight: "bold",
-    color: "#007bff",
-    marginBottom: "30px"
-  },
-  buttons: {
-    display: "flex",
-    gap: "15px",
-    justifyContent: "center"
-  },
-  button: {
-    padding: "12px 24px",
-    fontSize: "16px",
-    fontWeight: "600",
-    border: "none",
-    borderRadius: "8px",
-    cursor: "pointer",
-    transition: "all 0.2s",
-    flex: 1
-  },
-  redialBtn: {
-    backgroundColor: "#007bff",
-    color: "white"
-  },
-  hangupBtn: {
-    backgroundColor: "#dc3545",
-    color: "white"
-  },
-  disabled: {
-    opacity: 0.5,
-    cursor: "not-allowed"
-  }
 }
