@@ -11,7 +11,7 @@ export default function App() {
   const [isRedialEnabled, setIsRedialEnabled] = useState(true);
   
   const deviceRef = useRef(null);
-  const activeCallRef = useRef(null);
+  const connectionRef = useRef(null);
   const hasAutoStartedRef = useRef(false);
 
   // Get number from URL
@@ -51,53 +51,6 @@ export default function App() {
     return cleaned;
   };
 
-  const setupConnectionHandlers = (call) => {
-    console.log("Setting up call handlers, call object type:", typeof call);
-    
-    call.on("ringing", () => {
-      console.log("📞 Call is ringing");
-      setStatus(`📞 Ringing...`);
-    });
-
-    call.on("accept", () => {
-      console.log("✅ Call accepted/connected");
-      setStatus("✅ Call connected!");
-      setIsHangupEnabled(true);
-    });
-
-    call.on("disconnect", () => {
-      console.log("📴 Call disconnected");
-      setStatus("📴 Call ended");
-      setIsHangupEnabled(false);
-      setIsRedialEnabled(true);
-      activeCallRef.current = null;
-    });
-
-    call.on("error", (err) => {
-      console.error("❌ Call error:", err);
-      setStatus(`❌ Call failed: ${err.message}`);
-      setIsHangupEnabled(false);
-      setIsRedialEnabled(true);
-      activeCallRef.current = null;
-    });
-
-    call.on("reject", () => {
-      console.log("❌ Call rejected");
-      setStatus("❌ Call rejected");
-      setIsHangupEnabled(false);
-      setIsRedialEnabled(true);
-      activeCallRef.current = null;
-    });
-
-    call.on("cancel", () => {
-      console.log("⚠️ Call cancelled");
-      setStatus("Call cancelled");
-      setIsHangupEnabled(false);
-      setIsRedialEnabled(true);
-      activeCallRef.current = null;
-    });
-  };
-
   const startCall = async () => {
     const formattedNumber = formatPhoneNumber(phoneNumber);
     if (!formattedNumber) {
@@ -135,33 +88,70 @@ export default function App() {
       });
 
       twilioDevice.on("registered", () => {
-        console.log("✓ Device registered successfully");
-        setStatus(`📞 Calling ${formattedNumber}...`);
+        console.log("✓ Device registered");
+        setStatus(`📞 Dialing ${formattedNumber}...`);
         
-        try {
-          // Make the call
-          const call = twilioDevice.connect({ 
-            params: { To: formattedNumber } 
+        // Make the call
+        const callParams = { 
+          params: { To: formattedNumber } 
+        };
+        
+        const conn = twilioDevice.connect(callParams);
+        connectionRef.current = conn;
+        
+        // IMPORTANT: Enable hangup immediately when call is initiated
+        setIsHangupEnabled(true);
+        
+        // Wait a moment for connection object to be ready before adding listeners
+        setTimeout(() => {
+          if (!conn || !conn.on) {
+            console.error("Connection object not ready");
+            return;
+          }
+
+          conn.on("ringing", () => {
+            console.log("📞 Ringing...");
+            setStatus(`📞 Ringing ${formattedNumber}...`);
           });
-          
-          console.log("Call object created:", !!call);
-          console.log("Call has disconnect method:", typeof call?.disconnect);
-          
-          // Store the call object
-          activeCallRef.current = call;
-          
-          // Enable hangup immediately
-          setIsHangupEnabled(true);
-          
-          // Set up handlers immediately (no delay)
-          setupConnectionHandlers(call);
-          
-        } catch (err) {
-          console.error("Error creating call:", err);
-          setStatus(`❌ Failed to connect: ${err.message}`);
-          setIsHangupEnabled(false);
-          setIsRedialEnabled(true);
-        }
+
+          conn.on("accept", () => {
+            console.log("✓ Call connected!");
+            setStatus("✅ Call connected!");
+            setIsHangupEnabled(true);
+          });
+
+          conn.on("disconnect", () => {
+            console.log("Call ended");
+            setStatus("📴 Call ended");
+            setIsHangupEnabled(false);
+            setIsRedialEnabled(true);
+            connectionRef.current = null;
+          });
+
+          conn.on("error", (err) => {
+            console.error("Call error:", err);
+            setStatus(`❌ Call failed: ${err.message}`);
+            setIsHangupEnabled(false);
+            setIsRedialEnabled(true);
+            connectionRef.current = null;
+          });
+
+          conn.on("reject", () => {
+            console.log("Call rejected");
+            setStatus("❌ Call rejected");
+            setIsHangupEnabled(false);
+            setIsRedialEnabled(true);
+            connectionRef.current = null;
+          });
+
+          conn.on("cancel", () => {
+            console.log("Call cancelled");
+            setStatus("Call cancelled");
+            setIsHangupEnabled(false);
+            setIsRedialEnabled(true);
+            connectionRef.current = null;
+          });
+        }, 50);
       });
 
       twilioDevice.register();
@@ -176,42 +166,27 @@ export default function App() {
 
   const hangup = () => {
     console.log("🔴 HANGUP CLICKED!");
-    console.log("Active call exists:", !!activeCallRef.current);
-    console.log("Active call type:", typeof activeCallRef.current);
-    console.log("Has disconnect method:", typeof activeCallRef.current?.disconnect);
+    console.log("Connection exists:", !!connectionRef.current);
+    console.log("Device exists:", !!deviceRef.current);
     
     setStatus("Hanging up...");
     
-    // Disconnect the active call
-    if (activeCallRef.current) {
+    // First, disconnect the call
+    if (connectionRef.current) {
       try {
-        console.log("Attempting to disconnect...");
-        
-        // Check if disconnect method exists
-        if (typeof activeCallRef.current.disconnect === 'function') {
-          activeCallRef.current.disconnect();
-          console.log("✓ Call disconnected successfully");
-        } else {
-          console.error("disconnect is not a function on call object");
-          // Try alternative methods
-          if (typeof activeCallRef.current.reject === 'function') {
-            activeCallRef.current.reject();
-          }
-        }
-        
-        activeCallRef.current = null;
+        console.log("Disconnecting call...");
+        connectionRef.current.disconnect();
+        connectionRef.current = null;
       } catch (err) {
-        console.error("Error disconnecting call:", err);
-        activeCallRef.current = null;
+        console.error("Error disconnecting:", err);
       }
     }
     
-    // Destroy the device
+    // Then destroy the device
     if (deviceRef.current) {
       try {
         console.log("Destroying device...");
         deviceRef.current.destroy();
-        console.log("✓ Device destroyed");
         deviceRef.current = null;
       } catch (err) {
         console.error("Error destroying device:", err);
@@ -227,23 +202,17 @@ export default function App() {
     console.log("🔄 Redial clicked");
     
     // Clean up first
-    if (activeCallRef.current) {
+    if (connectionRef.current) {
       try {
-        if (typeof activeCallRef.current.disconnect === 'function') {
-          activeCallRef.current.disconnect();
-        }
-      } catch (e) {
-        console.log("Error during redial cleanup:", e);
-      }
-      activeCallRef.current = null;
+        connectionRef.current.disconnect();
+      } catch (e) {}
+      connectionRef.current = null;
     }
     
     if (deviceRef.current) {
       try {
         deviceRef.current.destroy();
-      } catch (e) {
-        console.log("Error destroying device during redial:", e);
-      }
+      } catch (e) {}
       deviceRef.current = null;
     }
     
@@ -367,9 +336,8 @@ export default function App() {
         <div><strong>Debug Info:</strong></div>
         <div>• Hangup Enabled: <strong>{isHangupEnabled ? 'YES ✓' : 'NO ✗'}</strong></div>
         <div>• Redial Enabled: <strong>{isRedialEnabled ? 'YES ✓' : 'NO ✗'}</strong></div>
-        <div>• Active Call: <strong>{activeCallRef.current ? 'EXISTS ✓' : 'NULL ✗'}</strong></div>
+        <div>• Connection: <strong>{connectionRef.current ? 'EXISTS ✓' : 'NULL ✗'}</strong></div>
         <div>• Device: <strong>{deviceRef.current ? 'EXISTS ✓' : 'NULL ✗'}</strong></div>
-        <div>• Disconnect Available: <strong>{typeof activeCallRef.current?.disconnect === 'function' ? 'YES ✓' : 'NO ✗'}</strong></div>
       </div>
     </div>
   );
