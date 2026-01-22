@@ -7,11 +7,11 @@ const CLOUD_FUNCTION_URL =
 export default function App() {
   const [status, setStatus] = useState("Initializing...");
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [isConnected, setIsConnected] = useState(false);
+  const [callState, setCallState] = useState("idle"); // idle, connecting, ringing, connected
   
-  // Use refs to maintain references without triggering re-renders
   const deviceRef = useRef(null);
   const connectionRef = useRef(null);
+  const isInitializedRef = useRef(false);
 
   // Get number from URL
   useEffect(() => {
@@ -19,28 +19,43 @@ export default function App() {
     const urlNumber = urlParams.get("to");
     if (urlNumber) {
       setPhoneNumber(urlNumber);
-      setStatus("Ready to call…");
+      setStatus("Ready to call");
     } else {
-      setStatus("❌ No phone number provided in URL (?to=+1234567890)");
+      setStatus("❌ No phone number in URL (?to=+1234567890)");
     }
   }, []);
 
-  // Start call immediately when phoneNumber is set
+  // Auto-start call
   useEffect(() => {
-    if (phoneNumber) {
+    if (phoneNumber && !isInitializedRef.current) {
+      isInitializedRef.current = true;
       startCall();
     }
-    // Cleanup on unmount
+    
     return () => {
-      if (connectionRef.current) {
-        connectionRef.current.disconnect();
-      }
-      if (deviceRef.current) {
-        deviceRef.current.destroy();
-      }
+      cleanup();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phoneNumber]);
+
+  const cleanup = () => {
+    if (connectionRef.current) {
+      try {
+        connectionRef.current.disconnect();
+      } catch (e) {
+        console.log("Error disconnecting:", e);
+      }
+      connectionRef.current = null;
+    }
+    
+    if (deviceRef.current) {
+      try {
+        deviceRef.current.destroy();
+      } catch (e) {
+        console.log("Error destroying device:", e);
+      }
+      deviceRef.current = null;
+    }
+  };
 
   const checkMicPermission = async () => {
     try {
@@ -70,53 +85,90 @@ export default function App() {
     if (!micAllowed) return;
 
     try {
-      setStatus("Fetching Twilio token…");
+      setStatus("🔄 Fetching token...");
+      setCallState("connecting");
+      
       const res = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
       const data = await res.json();
       const token = data.token;
 
-      const twilioDevice = new Device(token, { enableRingingState: true });
-
-      twilioDevice.on("registered", () => {
-        setStatus(`Calling ${formattedNumber}…`);
-        
-        // Make the call
-        const conn = twilioDevice.connect({ params: { To: formattedNumber } });
-        connectionRef.current = conn;
-
-        // Set up connection event listeners
-        conn.on("accept", () => {
-          setStatus("✅ Call connected");
-          setIsConnected(true);
-        });
-
-        conn.on("disconnect", () => {
-          setStatus("Call ended");
-          setIsConnected(false);
-          connectionRef.current = null;
-        });
-
-        conn.on("error", (err) => {
-          console.error("Connection error:", err);
-          setStatus(`❌ Call failed: ${err.message}`);
-          setIsConnected(false);
-          connectionRef.current = null;
-        });
-
-        conn.on("reject", () => {
-          setStatus("❌ Call rejected");
-          setIsConnected(false);
-          connectionRef.current = null;
-        });
+      setStatus("🔄 Initializing device...");
+      const twilioDevice = new Device(token, { 
+        enableRingingState: true,
+        codecPreferences: ["opus", "pcmu"]
       });
 
+      // Device error handler
       twilioDevice.on("error", (err) => {
         console.error("Device error:", err);
         setStatus(`❌ Device error: ${err.message}`);
+        setCallState("idle");
       });
 
-      twilioDevice.on("unregistered", () => {
-        console.log("Device unregistered");
+      // Device registered
+      twilioDevice.on("registered", () => {
+        console.log("Device registered, making call...");
+        setStatus(`📞 Calling ${formattedNumber}...`);
+        setCallState("ringing");
+        
+        try {
+          const conn = twilioDevice.connect({ 
+            params: { To: formattedNumber } 
+          });
+          
+          connectionRef.current = conn;
+          
+          // Connection ringing
+          conn.on("ringing", () => {
+            console.log("Call is ringing");
+            setStatus(`📞 Ringing ${formattedNumber}...`);
+            setCallState("ringing");
+          });
+
+          // Connection accepted
+          conn.on("accept", () => {
+            console.log("Call connected");
+            setStatus("✅ Call connected");
+            setCallState("connected");
+          });
+
+          // Connection disconnected
+          conn.on("disconnect", () => {
+            console.log("Call disconnected");
+            setStatus("Call ended");
+            setCallState("idle");
+            connectionRef.current = null;
+          });
+
+          // Connection error
+          conn.on("error", (err) => {
+            console.error("Connection error:", err);
+            setStatus(`❌ Call failed: ${err.message}`);
+            setCallState("idle");
+            connectionRef.current = null;
+          });
+
+          // Connection rejected
+          conn.on("reject", () => {
+            console.log("Call rejected");
+            setStatus("❌ Call was rejected");
+            setCallState("idle");
+            connectionRef.current = null;
+          });
+
+          // Connection cancel
+          conn.on("cancel", () => {
+            console.log("Call cancelled");
+            setStatus("Call cancelled");
+            setCallState("idle");
+            connectionRef.current = null;
+          });
+
+        } catch (err) {
+          console.error("Error making call:", err);
+          setStatus(`❌ Failed to connect: ${err.message}`);
+          setCallState("idle");
+        }
       });
 
       twilioDevice.register();
@@ -125,41 +177,48 @@ export default function App() {
     } catch (err) {
       console.error("Start call error:", err);
       setStatus(`❌ Error: ${err.message}`);
+      setCallState("idle");
     }
   };
 
   const hangup = () => {
-    try {
-      // Disconnect the active connection first
-      if (connectionRef.current) {
+    console.log("Hangup clicked, callState:", callState);
+    
+    if (connectionRef.current) {
+      console.log("Disconnecting connection...");
+      try {
         connectionRef.current.disconnect();
-        connectionRef.current = null;
+      } catch (err) {
+        console.error("Error disconnecting:", err);
       }
-      
-      // Then destroy the device
-      if (deviceRef.current) {
-        deviceRef.current.unregister();
-        deviceRef.current.destroy();
-        deviceRef.current = null;
-      }
-      
-      setIsConnected(false);
-      setStatus("Call ended");
-    } catch (err) {
-      console.error("Hangup error:", err);
-      setStatus("Call ended (with errors)");
-      setIsConnected(false);
+      connectionRef.current = null;
     }
+    
+    if (deviceRef.current) {
+      console.log("Destroying device...");
+      try {
+        deviceRef.current.destroy();
+      } catch (err) {
+        console.error("Error destroying device:", err);
+      }
+      deviceRef.current = null;
+    }
+    
+    setCallState("idle");
+    setStatus("📴 Call ended");
   };
 
   const redial = () => {
+    console.log("Redial clicked");
     hangup();
     setTimeout(() => {
       if (phoneNumber) {
         startCall();
       }
-    }, 1000);
+    }, 500);
   };
+
+  const isCallActive = callState === "connecting" || callState === "ringing" || callState === "connected";
 
   return (
     <div style={{
@@ -182,13 +241,17 @@ export default function App() {
 
       <div style={{
         padding: '15px',
-        backgroundColor: isConnected ? '#d4edda' : '#fff3cd',
-        border: `1px solid ${isConnected ? '#c3e6cb' : '#ffeeba'}`,
+        backgroundColor: callState === 'connected' ? '#d4edda' : callState === 'idle' ? '#f8f9fa' : '#fff3cd',
+        border: `1px solid ${callState === 'connected' ? '#c3e6cb' : callState === 'idle' ? '#dee2e6' : '#ffeeba'}`,
         borderRadius: '8px',
         marginBottom: '20px',
         textAlign: 'center',
         fontWeight: '500',
-        color: '#333'
+        color: '#333',
+        minHeight: '50px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
       }}>
         {status}
       </div>
@@ -208,13 +271,22 @@ export default function App() {
       </div>
 
       <div style={{
+        marginBottom: '15px',
+        textAlign: 'center',
+        fontSize: '12px',
+        color: '#666'
+      }}>
+        Call State: <strong>{callState}</strong>
+      </div>
+
+      <div style={{
         display: 'flex',
         gap: '10px',
         justifyContent: 'center'
       }}>
         <button
           onClick={redial}
-          disabled={isConnected || !phoneNumber}
+          disabled={isCallActive || !phoneNumber}
           style={{
             flex: 1,
             padding: '12px 20px',
@@ -222,11 +294,21 @@ export default function App() {
             fontWeight: '600',
             border: 'none',
             borderRadius: '8px',
-            cursor: isConnected || !phoneNumber ? 'not-allowed' : 'pointer',
-            backgroundColor: isConnected || !phoneNumber ? '#ccc' : '#28a745',
+            cursor: (isCallActive || !phoneNumber) ? 'not-allowed' : 'pointer',
+            backgroundColor: (isCallActive || !phoneNumber) ? '#ccc' : '#28a745',
             color: '#fff',
             transition: 'all 0.2s',
-            opacity: isConnected || !phoneNumber ? 0.6 : 1
+            opacity: (isCallActive || !phoneNumber) ? 0.6 : 1
+          }}
+          onMouseOver={(e) => {
+            if (!isCallActive && phoneNumber) {
+              e.target.style.backgroundColor = '#218838';
+            }
+          }}
+          onMouseOut={(e) => {
+            if (!isCallActive && phoneNumber) {
+              e.target.style.backgroundColor = '#28a745';
+            }
           }}
         >
           🔄 Redial
@@ -234,7 +316,7 @@ export default function App() {
         
         <button
           onClick={hangup}
-          disabled={!isConnected}
+          disabled={!isCallActive}
           style={{
             flex: 1,
             padding: '12px 20px',
@@ -242,15 +324,38 @@ export default function App() {
             fontWeight: '600',
             border: 'none',
             borderRadius: '8px',
-            cursor: !isConnected ? 'not-allowed' : 'pointer',
-            backgroundColor: !isConnected ? '#ccc' : '#dc3545',
+            cursor: !isCallActive ? 'not-allowed' : 'pointer',
+            backgroundColor: !isCallActive ? '#ccc' : '#dc3545',
             color: '#fff',
             transition: 'all 0.2s',
-            opacity: !isConnected ? 0.6 : 1
+            opacity: !isCallActive ? 0.6 : 1
+          }}
+          onMouseOver={(e) => {
+            if (isCallActive) {
+              e.target.style.backgroundColor = '#c82333';
+            }
+          }}
+          onMouseOut={(e) => {
+            if (isCallActive) {
+              e.target.style.backgroundColor = '#dc3545';
+            }
           }}
         >
           📴 Hang Up
         </button>
+      </div>
+
+      <div style={{
+        marginTop: '20px',
+        padding: '10px',
+        backgroundColor: '#e9ecef',
+        borderRadius: '6px',
+        fontSize: '11px',
+        color: '#666'
+      }}>
+        Debug: Hangup button is {isCallActive ? 'ENABLED' : 'DISABLED'}
+        <br />
+        Connection exists: {connectionRef.current ? 'YES' : 'NO'}
       </div>
     </div>
   );
