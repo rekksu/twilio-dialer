@@ -261,18 +261,23 @@ export default function App() {
 
   return (
     <div style={{
-  minHeight: '100vh',
+  position: 'fixed',        // Fix to viewport
+  top: 0,
+  left: 0,
+  width: '100%',
+  height: '100%',
   display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
+  alignItems: 'center',     // vertical center
+  justifyContent: 'center', // horizontal center
   backgroundColor: '#f3f4f6', // Soft CRM-style background
-  padding: '20px'
+  padding: '20px',
+  boxSizing: 'border-box'
 }}>
   <div style={{
     width: '100%',
     maxWidth: '500px',
     padding: '35px 40px',
-    backgroundColor: '#ffffff', // Dialer panel background
+    backgroundColor: '#ffffff', 
     borderRadius: '16px',
     boxShadow: '0 15px 35px rgba(0,0,0,0.12)',
     fontFamily: 'Inter, system-ui, -apple-system, sans-serif'
@@ -285,7 +290,7 @@ export default function App() {
       fontWeight: '700',
       letterSpacing: '0.5px'
     }}>
-      📞 CRM Twilio Dialer
+      📞 Orbit Dialer
     </h2>
 
     <div style={{
