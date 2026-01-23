@@ -4,15 +4,43 @@ import { Device } from "@twilio/voice-sdk";
 const CLOUD_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 
+/* ✅ ADD: Call log Cloud Function */
+const CALL_LOG_FUNCTION_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/createCallLog";
+
 export default function App() {
   const [status, setStatus] = useState("Initializing...");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [isHangupEnabled, setIsHangupEnabled] = useState(false);
   const [isRedialEnabled, setIsRedialEnabled] = useState(true);
-  
+
   const deviceRef = useRef(null);
   const connectionRef = useRef(null);
   const hasAutoStartedRef = useRef(false);
+
+  /* ✅ ADD: helper to save call result */
+  const saveCallResult = async (
+    status,
+    reason = null,
+    customerId = null,
+    orgId = null
+  ) => {
+    try {
+      await fetch(CALL_LOG_FUNCTION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: phoneNumber,
+          status,
+          reason,
+          customerId,
+          orgId,
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to save call log", err);
+    }
+  };
 
   // Get number from URL
   useEffect(() => {
@@ -88,68 +116,65 @@ export default function App() {
       });
 
       twilioDevice.on("registered", () => {
-        console.log("✓ Device registered");
         setStatus(`📞 Dialing ${formattedNumber}...`);
-        
-        // Make the call
-        const callParams = { 
-          params: { To: formattedNumber } 
-        };
-        
-        const conn = twilioDevice.connect(callParams);
+
+        const conn = twilioDevice.connect({
+          params: { To: formattedNumber }
+        });
+
         connectionRef.current = conn;
-        
-        // IMPORTANT: Enable hangup immediately when call is initiated
         setIsHangupEnabled(true);
-        
-        // Wait a moment for connection object to be ready before adding listeners
+
         setTimeout(() => {
-          if (!conn || !conn.on) {
-            console.error("Connection object not ready");
-            return;
-          }
+          if (!conn || !conn.on) return;
 
           conn.on("ringing", () => {
-            console.log("📞 Ringing...");
             setStatus(`📞 Ringing ${formattedNumber}...`);
           });
 
           conn.on("accept", () => {
-            console.log("✓ Call connected!");
             setStatus("✅ Call connected!");
             setIsHangupEnabled(true);
           });
 
           conn.on("disconnect", () => {
-            console.log("Call ended");
             setStatus("📴 Call ended");
             setIsHangupEnabled(false);
             setIsRedialEnabled(true);
             connectionRef.current = null;
+
+            /* ✅ ADD */
+            saveCallResult("ended");
           });
 
           conn.on("error", (err) => {
-            console.error("Call error:", err);
             setStatus(`❌ Call failed: ${err.message}`);
             setIsHangupEnabled(false);
             setIsRedialEnabled(true);
             connectionRef.current = null;
+
+            /* ✅ ADD */
+            saveCallResult("failed", err.message);
           });
 
           conn.on("reject", () => {
-            console.log("Call rejected");
             setStatus("❌ Call rejected");
             setIsHangupEnabled(false);
             setIsRedialEnabled(true);
             connectionRef.current = null;
+
+            /* ✅ ADD */
+            saveCallResult("rejected");
           });
 
           conn.on("cancel", () => {
-            console.log("Call cancelled");
             setStatus("Call cancelled");
             setIsHangupEnabled(false);
             setIsRedialEnabled(true);
             connectionRef.current = null;
+
+            /* ✅ ADD */
+            saveCallResult("cancelled");
           });
         }, 50);
       });
@@ -157,7 +182,6 @@ export default function App() {
       twilioDevice.register();
 
     } catch (err) {
-      console.error("Error starting call:", err);
       setStatus(`❌ Error: ${err.message}`);
       setIsHangupEnabled(false);
       setIsRedialEnabled(true);
@@ -165,180 +189,51 @@ export default function App() {
   };
 
   const hangup = () => {
-    console.log("🔴 HANGUP CLICKED!");
-    console.log("Connection exists:", !!connectionRef.current);
-    console.log("Device exists:", !!deviceRef.current);
-    
     setStatus("Hanging up...");
-    
-    // First, disconnect the call
+
     if (connectionRef.current) {
-      try {
-        console.log("Disconnecting call...");
-        connectionRef.current.disconnect();
-        connectionRef.current = null;
-      } catch (err) {
-        console.error("Error disconnecting:", err);
-      }
+      connectionRef.current.disconnect();
+      connectionRef.current = null;
     }
-    
-    // Then destroy the device
+
     if (deviceRef.current) {
-      try {
-        console.log("Destroying device...");
-        deviceRef.current.destroy();
-        deviceRef.current = null;
-      } catch (err) {
-        console.error("Error destroying device:", err);
-      }
+      deviceRef.current.destroy();
+      deviceRef.current = null;
     }
-    
+
     setIsHangupEnabled(false);
     setIsRedialEnabled(true);
     setStatus("📴 Call ended");
+
+    /* ✅ ADD */
+    saveCallResult("ended", "manual hangup");
   };
 
   const redial = () => {
-    console.log("🔄 Redial clicked");
-    
-    // Clean up first
     if (connectionRef.current) {
-      try {
-        connectionRef.current.disconnect();
-      } catch (e) {}
+      connectionRef.current.disconnect();
       connectionRef.current = null;
     }
-    
+
     if (deviceRef.current) {
-      try {
-        deviceRef.current.destroy();
-      } catch (e) {}
+      deviceRef.current.destroy();
       deviceRef.current = null;
     }
-    
+
     setIsHangupEnabled(false);
     setIsRedialEnabled(false);
-    
-    setTimeout(() => {
-      startCall();
-    }, 500);
+
+    setTimeout(startCall, 500);
   };
 
   return (
-    <div style={{
-      maxWidth: '450px',
-      margin: '50px auto',
-      padding: '30px',
-      backgroundColor: '#ffffff',
-      borderRadius: '16px',
-      boxShadow: '0 8px 16px rgba(0,0,0,0.12)',
-      fontFamily: 'system-ui, -apple-system, sans-serif'
-    }}>
-      <h2 style={{
-        textAlign: 'center',
-        color: '#1a1a1a',
-        marginBottom: '25px',
-        fontSize: '26px',
-        fontWeight: '700'
-      }}>
-        📞 Twilio Dialer
-      </h2>
+    <div style={{ maxWidth: 450, margin: "50px auto", padding: 30 }}>
+      <h2>📞 Twilio Dialer</h2>
+      <div>{status}</div>
+      <div>{phoneNumber}</div>
 
-      <div style={{
-        padding: '18px',
-        backgroundColor: isHangupEnabled ? '#d4edda' : '#f8f9fa',
-        border: `2px solid ${isHangupEnabled ? '#28a745' : '#dee2e6'}`,
-        borderRadius: '10px',
-        marginBottom: '20px',
-        textAlign: 'center',
-        fontWeight: '600',
-        color: '#1a1a1a',
-        minHeight: '60px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '15px'
-      }}>
-        {status}
-      </div>
-
-      <div style={{
-        padding: '15px',
-        backgroundColor: '#f0f7ff',
-        border: '2px solid #007bff',
-        borderRadius: '10px',
-        marginBottom: '20px',
-        textAlign: 'center',
-        fontSize: '20px',
-        fontWeight: 'bold',
-        color: '#007bff',
-        letterSpacing: '0.5px'
-      }}>
-        {phoneNumber || "No number"}
-      </div>
-
-      <div style={{
-        display: 'flex',
-        gap: '12px',
-        marginBottom: '20px'
-      }}>
-        <button
-          onClick={redial}
-          disabled={!isRedialEnabled || !phoneNumber}
-          style={{
-            flex: 1,
-            padding: '14px 24px',
-            fontSize: '16px',
-            fontWeight: '700',
-            border: 'none',
-            borderRadius: '10px',
-            cursor: (!isRedialEnabled || !phoneNumber) ? 'not-allowed' : 'pointer',
-            backgroundColor: (!isRedialEnabled || !phoneNumber) ? '#e0e0e0' : '#28a745',
-            color: '#fff',
-            transition: 'all 0.2s',
-            opacity: (!isRedialEnabled || !phoneNumber) ? 0.5 : 1,
-            boxShadow: (isRedialEnabled && phoneNumber) ? '0 4px 8px rgba(40, 167, 69, 0.3)' : 'none'
-          }}
-        >
-          🔄 Redial
-        </button>
-        
-        <button
-          onClick={hangup}
-          disabled={!isHangupEnabled}
-          style={{
-            flex: 1,
-            padding: '14px 24px',
-            fontSize: '16px',
-            fontWeight: '700',
-            border: 'none',
-            borderRadius: '10px',
-            cursor: !isHangupEnabled ? 'not-allowed' : 'pointer',
-            backgroundColor: !isHangupEnabled ? '#e0e0e0' : '#dc3545',
-            color: '#fff',
-            transition: 'all 0.2s',
-            opacity: !isHangupEnabled ? 0.5 : 1,
-            boxShadow: isHangupEnabled ? '0 4px 8px rgba(220, 53, 69, 0.3)' : 'none'
-          }}
-        >
-          📴 Hang Up
-        </button>
-      </div>
-
-      <div style={{
-        padding: '12px',
-        backgroundColor: '#fff3cd',
-        borderRadius: '8px',
-        fontSize: '12px',
-        color: '#856404',
-        border: '1px solid #ffeaa7'
-      }}>
-        <div><strong>Debug Info:</strong></div>
-        <div>• Hangup Enabled: <strong>{isHangupEnabled ? 'YES ✓' : 'NO ✗'}</strong></div>
-        <div>• Redial Enabled: <strong>{isRedialEnabled ? 'YES ✓' : 'NO ✗'}</strong></div>
-        <div>• Connection: <strong>{connectionRef.current ? 'EXISTS ✓' : 'NULL ✗'}</strong></div>
-        <div>• Device: <strong>{deviceRef.current ? 'EXISTS ✓' : 'NULL ✗'}</strong></div>
-      </div>
+      <button onClick={redial} disabled={!isRedialEnabled}>🔄 Redial</button>
+      <button onClick={hangup} disabled={!isHangupEnabled}>📴 Hang Up</button>
     </div>
   );
 }
