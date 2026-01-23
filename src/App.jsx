@@ -261,119 +261,123 @@ export default function App() {
 
   return (
     <div style={{
-      maxWidth: '450px',
-      margin: '50px auto',
-      padding: '30px',
-      backgroundColor: '#ffffff',
-      borderRadius: '16px',
-      boxShadow: '0 8px 16px rgba(0,0,0,0.12)',
-      fontFamily: 'system-ui, -apple-system, sans-serif'
-    }}>
-      <h2 style={{
-        textAlign: 'center',
-        color: '#1a1a1a',
-        marginBottom: '25px',
-        fontSize: '26px',
-        fontWeight: '700'
-      }}>
-        📞 Twilio Dialer
-      </h2>
+  maxWidth: '500px',
+  margin: '40px auto',
+  padding: '30px 35px',
+  backgroundColor: '#fefefe',
+  borderRadius: '16px',
+  boxShadow: '0 10px 25px rgba(0,0,0,0.12)',
+  fontFamily: 'Inter, system-ui, -apple-system, sans-serif'
+}}>
+  <h2 style={{
+    textAlign: 'center',
+    color: '#1f2937',
+    marginBottom: '30px',
+    fontSize: '28px',
+    fontWeight: '700',
+    letterSpacing: '0.5px'
+  }}>
+    📞 CRM Twilio Dialer
+  </h2>
 
-      <div style={{
-        padding: '18px',
-        backgroundColor: isHangupEnabled ? '#d4edda' : '#f8f9fa',
-        border: `2px solid ${isHangupEnabled ? '#28a745' : '#dee2e6'}`,
-        borderRadius: '10px',
-        marginBottom: '20px',
-        textAlign: 'center',
+  <div style={{
+    padding: '20px',
+    backgroundColor: isHangupEnabled ? '#e6f4ea' : '#f3f4f6',
+    border: `2px solid ${isHangupEnabled ? '#34d399' : '#d1d5db'}`,
+    borderRadius: '12px',
+    marginBottom: '25px',
+    textAlign: 'center',
+    fontWeight: '600',
+    color: '#111827',
+    minHeight: '70px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '16px',
+    transition: 'all 0.2s'
+  }}>
+    {status}
+  </div>
+
+  <div style={{
+    padding: '18px',
+    backgroundColor: '#eff6ff',
+    border: '2px solid #3b82f6',
+    borderRadius: '12px',
+    marginBottom: '30px',
+    textAlign: 'center',
+    fontSize: '22px',
+    fontWeight: '700',
+    color: '#1e40af',
+    letterSpacing: '0.5px'
+  }}>
+    {phoneNumber || "No number"}
+  </div>
+
+  <div style={{
+    display: 'flex',
+    gap: '15px',
+    marginBottom: '25px'
+  }}>
+    <button
+      onClick={redial}
+      disabled={!isRedialEnabled || !phoneNumber}
+      style={{
+        flex: 1,
+        padding: '16px 26px',
+        fontSize: '16px',
         fontWeight: '600',
-        color: '#1a1a1a',
-        minHeight: '60px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '15px'
-      }}>
-        {status}
-      </div>
+        border: 'none',
+        borderRadius: '12px',
+        cursor: (!isRedialEnabled || !phoneNumber) ? 'not-allowed' : 'pointer',
+        backgroundColor: (!isRedialEnabled || !phoneNumber) ? '#d1d5db' : '#10b981',
+        color: '#fff',
+        transition: 'all 0.2s',
+        opacity: (!isRedialEnabled || !phoneNumber) ? 0.6 : 1,
+        boxShadow: (isRedialEnabled && phoneNumber) ? '0 4px 12px rgba(16, 185, 129, 0.25)' : 'none'
+      }}
+    >
+      🔄 Redial
+    </button>
 
-      <div style={{
-        padding: '15px',
-        backgroundColor: '#f0f7ff',
-        border: '2px solid #007bff',
-        borderRadius: '10px',
-        marginBottom: '20px',
-        textAlign: 'center',
-        fontSize: '20px',
-        fontWeight: 'bold',
-        color: '#007bff',
-        letterSpacing: '0.5px'
-      }}>
-        {phoneNumber || "No number"}
-      </div>
+    <button
+      onClick={hangup}
+      disabled={!isHangupEnabled}
+      style={{
+        flex: 1,
+        padding: '16px 26px',
+        fontSize: '16px',
+        fontWeight: '600',
+        border: 'none',
+        borderRadius: '12px',
+        cursor: !isHangupEnabled ? 'not-allowed' : 'pointer',
+        backgroundColor: !isHangupEnabled ? '#d1d5db' : '#ef4444',
+        color: '#fff',
+        transition: 'all 0.2s',
+        opacity: !isHangupEnabled ? 0.6 : 1,
+        boxShadow: isHangupEnabled ? '0 4px 12px rgba(239, 68, 68, 0.25)' : 'none'
+      }}
+    >
+      📴 Hang Up
+    </button>
+  </div>
 
-      <div style={{
-        display: 'flex',
-        gap: '12px',
-        marginBottom: '20px'
-      }}>
-        <button
-          onClick={redial}
-          disabled={!isRedialEnabled || !phoneNumber}
-          style={{
-            flex: 1,
-            padding: '14px 24px',
-            fontSize: '16px',
-            fontWeight: '700',
-            border: 'none',
-            borderRadius: '10px',
-            cursor: (!isRedialEnabled || !phoneNumber) ? 'not-allowed' : 'pointer',
-            backgroundColor: (!isRedialEnabled || !phoneNumber) ? '#e0e0e0' : '#28a745',
-            color: '#fff',
-            transition: 'all 0.2s',
-            opacity: (!isRedialEnabled || !phoneNumber) ? 0.5 : 1,
-            boxShadow: (isRedialEnabled && phoneNumber) ? '0 4px 8px rgba(40, 167, 69, 0.3)' : 'none'
-          }}
-        >
-          🔄 Redial
-        </button>
-        
-        <button
-          onClick={hangup}
-          disabled={!isHangupEnabled}
-          style={{
-            flex: 1,
-            padding: '14px 24px',
-            fontSize: '16px',
-            fontWeight: '700',
-            border: 'none',
-            borderRadius: '10px',
-            cursor: !isHangupEnabled ? 'not-allowed' : 'pointer',
-            backgroundColor: !isHangupEnabled ? '#e0e0e0' : '#dc3545',
-            color: '#fff',
-            transition: 'all 0.2s',
-            opacity: !isHangupEnabled ? 0.5 : 1,
-            boxShadow: isHangupEnabled ? '0 4px 8px rgba(220, 53, 69, 0.3)' : 'none'
-          }}
-        >
-          📴 Hang Up
-        </button>
-      </div>
-
-      <div style={{
-        padding: '12px',
-        backgroundColor: '#fff3cd',
-        borderRadius: '8px',
-        fontSize: '12px',
-        color: '#856404',
-        border: '1px solid #ffeaa7'
-      }}>
-        <div><strong>Debug Info:</strong></div>
-        <div>• Hangup Enabled: <strong>{isHangupEnabled ? 'YES ✓' : 'NO ✗'}</strong></div>
-        <div>• Redial Enabled: <strong>{isRedialEnabled ? 'YES ✓' : 'NO ✗'}</strong></div>
-        <div>• Connection: <strong>{connectionRef.current ? 'EXISTS ✓' : 'NULL ✗'}</strong></div>
-        <div>• Device: <strong>{deviceRef.current ? 'EXISTS ✓' : 'NULL ✗'}</strong></div>
-      </div>
-    </div>
+  <div style={{
+    padding: '14px 18px',
+    backgroundColor: '#fef3c7',
+    borderRadius: '10px',
+    fontSize: '13px',
+    color: '#92400e',
+    border: '1px solid #fde68a'
+  }}>
+    <div><strong>Debug Info:</strong></div>
+    <div>• Hangup Enabled: <strong>{isHangupEnabled ? 'YES ✓' : 'NO ✗'}</strong></div>
+    <div>• Redial Enabled: <strong>{isRedialEnabled ? 'YES ✓' : 'NO ✗'}</strong></div>
+    <div>• Connection: <strong>{connectionRef.current ? 'EXISTS ✓' : 'NULL ✗'}</strong></div>
+    <div>• Device: <strong>{deviceRef.current ? 'EXISTS ✓' : 'NULL ✗'}</strong></div>
+    {customerId && <div>• Customer ID: <strong>{customerId}</strong></div>}
+    {orgId && <div>• Org ID: <strong>{orgId}</strong></div>}
+  </div>
+</div>
   );
 }
