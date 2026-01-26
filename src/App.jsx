@@ -11,15 +11,17 @@ const CALL_LOG_FUNCTION_URL =
 export default function App() {
   const [status, setStatus] = useState("Initializing...");
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [customerId, setCustomerId] = useState(null);
-  const [orgId, setOrgId] = useState(null);
+  const [customerId, setCustomerId] = useState(null); // ✅ add
+  const [orgId, setOrgId] = useState(null);           // ✅ add
   const [isHangupEnabled, setIsHangupEnabled] = useState(false);
   const [isRedialEnabled, setIsRedialEnabled] = useState(true);
-  
+
   const deviceRef = useRef(null);
   const connectionRef = useRef(null);
   const hasAutoStartedRef = useRef(false);
+
   const callStartTimeRef = useRef(null);
+
 
   // Helper to save call logs
   const saveCallResult = async (
@@ -50,6 +52,8 @@ export default function App() {
       console.error("Failed to save call log", err);
     }
   };
+
+
 
   // Get number, customerId, orgId from URL
   useEffect(() => {
@@ -109,14 +113,14 @@ export default function App() {
 
     try {
       setStatus("🔄 Fetching token...");
-      
+
       const res = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
       const data = await res.json();
       const token = data.token;
 
       setStatus("🔄 Setting up device...");
-      
-      const twilioDevice = new Device(token, { 
+
+      const twilioDevice = new Device(token, {
         enableRingingState: true,
         codecPreferences: ["opus", "pcmu"]
       });
@@ -133,72 +137,92 @@ export default function App() {
       twilioDevice.on("registered", () => {
         console.log("✓ Device registered");
         setStatus(`📞 Dialing ${formattedNumber}...`);
-        
-        const callParams = { 
-          params: { To: formattedNumber } 
+
+        const callParams = {
+          params: { To: formattedNumber }
         };
-        
+
         const conn = twilioDevice.connect(callParams);
         connectionRef.current = conn;
         setIsHangupEnabled(true);
 
-        conn.on("ringing", () => {
-          console.log("📞 Ringing...");
-          setStatus(`📞 Ringing ${formattedNumber}...`);
-        });
+        setTimeout(() => {
+          if (!conn || !conn.on) {
+            console.error("Connection object not ready");
+            return;
+          }
 
-        conn.on("accept", () => {
-          console.log("✓ Call connected!");
-          setStatus("✅ Call connected!");
-          setIsHangupEnabled(true);
-          callStartTimeRef.current = Date.now();
-        });
+          conn.on("ringing", () => {
+            console.log("📞 Ringing...");
+            setStatus(`📞 Ringing ${formattedNumber}...`);
+          });
 
-        conn.on("disconnect", () => {
-          console.log("Call ended");
-          setStatus("📴 Call ended");
-          setIsHangupEnabled(false);
-          setIsRedialEnabled(true);
-          connectionRef.current = null;
+          conn.on("accept", () => {
+            console.log("✓ Call connected!");
+            setStatus("✅ Call connected!");
+            setIsHangupEnabled(true);
+            callStartTimeRef.current = Date.now();
 
-          const endedAt = new Date().getTime();
-          const durationSeconds = callStartTimeRef.current
-            ? Math.floor((endedAt - callStartTimeRef.current) / 1000)
-            : 0;
+          });
 
-          saveCallResult("ended", null, customerId, orgId, callStartTimeRef.current, endedAt, durationSeconds);
+          conn.on("disconnect", () => {
+            console.log("Call ended");
+            setStatus("📴 Call ended");
+            setIsHangupEnabled(false);
+            setIsRedialEnabled(true);
 
-          // reset start time
-          callStartTimeRef.current = null;
-        });
+            // Get Twilio duration in seconds
+            let durationSeconds = 0;
+            try {
+              if (conn && typeof conn.duration === "number") {
+                durationSeconds = conn.duration; // Twilio automatically tracks this
+              }
+            } catch (err) {
+              console.warn("Failed to get duration from Twilio:", err);
+            }
 
-        conn.on("error", (err) => {
-          console.error("Call error:", err);
-          setStatus(`❌ Call failed: ${err.message}`);
-          setIsHangupEnabled(false);
-          setIsRedialEnabled(true);
-          connectionRef.current = null;
+            // Send call log with duration
+            saveCallResult(
+              "ended",
+              null,
+              customerId,
+              orgId,
+              null,  // startedAt (optional)
+              null,  // endedAt (optional)
+              durationSeconds
+            );
 
-          saveCallResult("failed", err.message);
-        });
+            connectionRef.current = null;
+          });
 
-        conn.on("reject", () => {
-          console.log("Call rejected");
-          setStatus("❌ Call rejected");
-          setIsHangupEnabled(false);
-          setIsRedialEnabled(true);
-          connectionRef.current = null;
+          conn.on("error", (err) => {
+            console.error("Call error:", err);
+            setStatus(`❌ Call failed: ${err.message}`);
+            setIsHangupEnabled(false);
+            setIsRedialEnabled(true);
+            connectionRef.current = null;
 
-          saveCallResult("rejected");
-        });
+            saveCallResult("failed", err.message);
+          });
 
-        conn.on("cancel", () => {
-          console.log("Call cancelled");
-          setStatus("Call cancelled");
-          setIsHangupEnabled(false);
-          setIsRedialEnabled(true);
-          connectionRef.current = null;
-        });
+          conn.on("reject", () => {
+            console.log("Call rejected");
+            setStatus("❌ Call rejected");
+            setIsHangupEnabled(false);
+            setIsRedialEnabled(true);
+            connectionRef.current = null;
+
+            saveCallResult("rejected");
+          });
+
+          conn.on("cancel", () => {
+            console.log("Call cancelled");
+            setStatus("Call cancelled");
+            setIsHangupEnabled(false);
+            setIsRedialEnabled(true);
+            connectionRef.current = null;
+          });
+        }, 50);
       });
 
       twilioDevice.register();
@@ -215,9 +239,9 @@ export default function App() {
     console.log("🔴 HANGUP CLICKED!");
     console.log("Connection exists:", !!connectionRef.current);
     console.log("Device exists:", !!deviceRef.current);
-    
+
     setStatus("Hanging up...");
-    
+
     if (connectionRef.current) {
       try {
         connectionRef.current.disconnect();
@@ -226,7 +250,7 @@ export default function App() {
         console.error("Error disconnecting:", err);
       }
     }
-    
+
     if (deviceRef.current) {
       try {
         deviceRef.current.destroy();
@@ -235,34 +259,34 @@ export default function App() {
         console.error("Error destroying device:", err);
       }
     }
-    
+
     setIsHangupEnabled(false);
     setIsRedialEnabled(true);
     setStatus("📴 Call ended");
 
-    saveCallResult("ended", "manual hangup");
+    saveCallResult("ended", "manual hangup"); // ✅ log with customerId/orgId
   };
 
   const redial = () => {
     console.log("🔄 Redial clicked");
-    
+
     if (connectionRef.current) {
       try {
         connectionRef.current.disconnect();
-      } catch (e) {}
+      } catch (e) { }
       connectionRef.current = null;
     }
-    
+
     if (deviceRef.current) {
       try {
         deviceRef.current.destroy();
-      } catch (e) {}
+      } catch (e) { }
       deviceRef.current = null;
     }
-    
+
     setIsHangupEnabled(false);
     setIsRedialEnabled(false);
-    
+
     setTimeout(() => {
       startCall();
     }, 500);
@@ -291,7 +315,7 @@ export default function App() {
         boxShadow: '0 15px 35px rgba(0,0,0,0.12)',
         fontFamily: 'Inter, system-ui, -apple-system, sans-serif'
       }}>
-        
+
         {/* Header */}
         <h2 style={{
           textAlign: 'center',
@@ -394,5 +418,8 @@ export default function App() {
 
       </div>
     </div>
+
   );
 }
+
+
