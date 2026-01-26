@@ -3,28 +3,96 @@ import { Device } from "@twilio/voice-sdk";
 
 const CLOUD_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
+
+// Cloud Function to save call logs
 const CALL_LOG_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/createCallLog";
 
 export default function App() {
-  // State
   const [status, setStatus] = useState("Initializing...");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [customerId, setCustomerId] = useState(null);
   const [orgId, setOrgId] = useState(null);
   const [isHangupEnabled, setIsHangupEnabled] = useState(false);
   const [isRedialEnabled, setIsRedialEnabled] = useState(true);
-  const [callDuration, setCallDuration] = useState(0);
-  const [isCallActive, setIsCallActive] = useState(false);
+  const [callDuration, setCallDuration] = useState(0); // live duration
 
-  // Refs
   const deviceRef = useRef(null);
   const connectionRef = useRef(null);
   const hasAutoStartedRef = useRef(false);
+
   const callStartTimeRef = useRef(null);
   const durationIntervalRef = useRef(null);
 
-  // Get URL parameters on mount
+  // Helper to save call logs
+  const saveCallResult = async (
+    status,
+    reason = null,
+    customerIdVal = customerId,
+    orgIdVal = orgId,
+    durationSeconds = 0,
+    startedAt = null,
+    endedAt = null
+  ) => {
+    try {
+      await fetch(CALL_LOG_FUNCTION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: phoneNumber,
+          status,
+          reason,
+          customerId: customerIdVal || null,
+          orgId: orgIdVal || null,
+          startedAt: startedAt ? new Date(startedAt).toISOString() : null,
+          endedAt: endedAt ? new Date(endedAt).toISOString() : null,
+          durationSeconds,
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to save call log", err);
+    }
+  };
+
+  const handleCallEnd = (status, reason = null) => {
+    const endedAt = Date.now();
+    const durationSeconds = callStartTimeRef.current
+      ? Math.floor((endedAt - callStartTimeRef.current) / 1000)
+      : 0;
+
+    stopCallTimer();
+    saveCallResult(
+      status,
+      reason,
+      customerId,
+      orgId,
+      durationSeconds,
+      callStartTimeRef.current,
+      endedAt
+    );
+
+    callStartTimeRef.current = null;
+    connectionRef.current = null;
+    setIsHangupEnabled(false);
+    setIsRedialEnabled(true);
+    setCallDuration(0);
+    setStatus("📴 Call ended");
+  };
+
+  const startCallTimer = () => {
+    callStartTimeRef.current = Date.now();
+    setCallDuration(0);
+    durationIntervalRef.current = setInterval(() => {
+      setCallDuration(Math.floor((Date.now() - callStartTimeRef.current) / 1000));
+    }, 1000);
+  };
+
+  const stopCallTimer = () => {
+    if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
+    durationIntervalRef.current = null;
+  };
+
+  // Get number, customerId, orgId from URL
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const urlNumber = urlParams.get("to");
@@ -50,41 +118,10 @@ export default function App() {
     }
   }, [phoneNumber]);
 
-  // Update call duration every second
-  useEffect(() => {
-    if (isCallActive) {
-      durationIntervalRef.current = setInterval(() => {
-        if (callStartTimeRef.current) {
-          const elapsed = Math.floor((Date.now() - callStartTimeRef.current) / 1000);
-          setCallDuration(elapsed);
-        }
-      }, 1000);
-    } else {
-      if (durationIntervalRef.current) {
-        clearInterval(durationIntervalRef.current);
-        durationIntervalRef.current = null;
-      }
-    }
-
-    return () => {
-      if (durationIntervalRef.current) {
-        clearInterval(durationIntervalRef.current);
-      }
-    };
-  }, [isCallActive]);
-
-  // Format duration as MM:SS
-  const formatDuration = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-  };
-
-  // Check microphone permission
   const checkMicPermission = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((track) => track.stop());
+      stream.getTracks().forEach(track => track.stop());
       return true;
     } catch (err) {
       setStatus("❌ Microphone access denied");
@@ -92,43 +129,12 @@ export default function App() {
     }
   };
 
-  // Format phone number
   const formatPhoneNumber = (num) => {
     let cleaned = num.replace(/[\s\-\(\)]/g, "");
     if (!cleaned.startsWith("+")) cleaned = "+" + cleaned;
     return cleaned;
   };
 
-  // Save call log to Cloud Function
-  const saveCallResult = async (status, reason = null) => {
-    try {
-      const endedAt = Date.now();
-      const durationSeconds = callStartTimeRef.current
-        ? Math.floor((endedAt - callStartTimeRef.current) / 1000)
-        : 0;
-
-      await fetch(CALL_LOG_FUNCTION_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: phoneNumber,
-          status,
-          reason,
-          customerId: customerId || null,
-          orgId: orgId || null,
-          startedAt: callStartTimeRef.current
-            ? new Date(callStartTimeRef.current).toISOString()
-            : null,
-          endedAt: new Date(endedAt).toISOString(),
-          durationSeconds,
-        }),
-      });
-    } catch (err) {
-      console.error("Failed to save call log", err);
-    }
-  };
-
-  // Start call
   const startCall = async () => {
     const formattedNumber = formatPhoneNumber(phoneNumber);
     if (!formattedNumber) {
@@ -141,23 +147,18 @@ export default function App() {
 
     setIsRedialEnabled(false);
     setIsHangupEnabled(false);
-    setCallDuration(0);
-    setIsCallActive(false);
 
     try {
       setStatus("🔄 Fetching token...");
-
       const res = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
       const data = await res.json();
       const token = data.token;
 
       setStatus("🔄 Setting up device...");
-
-      const twilioDevice = new Device(token, {
+      const twilioDevice = new Device(token, { 
         enableRingingState: true,
-        codecPreferences: ["opus", "pcmu"],
+        codecPreferences: ["opus", "pcmu"]
       });
-
       deviceRef.current = twilioDevice;
 
       twilioDevice.on("error", (err) => {
@@ -165,16 +166,14 @@ export default function App() {
         setStatus(`❌ Device error: ${err.message}`);
         setIsHangupEnabled(false);
         setIsRedialEnabled(true);
-        setIsCallActive(false);
       });
 
       twilioDevice.on("registered", () => {
         console.log("✓ Device registered");
         setStatus(`📞 Dialing ${formattedNumber}...`);
 
-        const conn = twilioDevice.connect({
-          params: { To: formattedNumber },
-        });
+        const callParams = { params: { To: formattedNumber } };
+        const conn = twilioDevice.connect(callParams);
         connectionRef.current = conn;
         setIsHangupEnabled(true);
 
@@ -185,56 +184,19 @@ export default function App() {
           }
 
           conn.on("ringing", () => {
-            console.log("📞 Ringing...");
             setStatus(`📞 Ringing ${formattedNumber}...`);
           });
 
           conn.on("accept", () => {
-            console.log("✓ Call connected!");
             setStatus("✅ Call connected!");
             setIsHangupEnabled(true);
-            callStartTimeRef.current = Date.now();
-            setIsCallActive(true);
+            startCallTimer(); // start live duration
           });
 
-          conn.on("disconnect", () => {
-            console.log("Call ended");
-            setStatus("📴 Call ended");
-            setIsHangupEnabled(false);
-            setIsRedialEnabled(true);
-            setIsCallActive(false);
-            connectionRef.current = null;
-            saveCallResult("ended");
-          });
-
-          conn.on("error", (err) => {
-            console.error("Call error:", err);
-            setStatus(`❌ Call failed: ${err.message}`);
-            setIsHangupEnabled(false);
-            setIsRedialEnabled(true);
-            setIsCallActive(false);
-            connectionRef.current = null;
-            saveCallResult("failed", err.message);
-          });
-
-          conn.on("reject", () => {
-            console.log("Call rejected");
-            setStatus("❌ Call rejected");
-            setIsHangupEnabled(false);
-            setIsRedialEnabled(true);
-            setIsCallActive(false);
-            connectionRef.current = null;
-            saveCallResult("rejected");
-          });
-
-          conn.on("cancel", () => {
-            console.log("Call cancelled");
-            setStatus("Call cancelled");
-            setIsHangupEnabled(false);
-            setIsRedialEnabled(true);
-            setIsCallActive(false);
-            connectionRef.current = null;
-          });
+          conn.on("disconnect", () => handleCallEnd("ended"));
+          conn.on("error", (err) => handleCallEnd("failed", err.message));
+          conn.on("reject", () => handleCallEnd("rejected"));
+          conn.on("cancel", () => handleCallEnd("cancelled"));
         }, 50);
       });
 
@@ -244,197 +206,129 @@ export default function App() {
       setStatus(`❌ Error: ${err.message}`);
       setIsHangupEnabled(false);
       setIsRedialEnabled(true);
-      setIsCallActive(false);
     }
   };
 
-  // Hang up call
   const hangup = () => {
-    console.log("🔴 HANGUP CLICKED!");
-
-    setStatus("Hanging up...");
-
     if (connectionRef.current) {
-      try {
-        connectionRef.current.disconnect();
-        connectionRef.current = null;
-      } catch (err) {
-        console.error("Error disconnecting:", err);
-      }
+      try { connectionRef.current.disconnect(); } catch (err) {}
     }
-
     if (deviceRef.current) {
-      try {
-        deviceRef.current.destroy();
-        deviceRef.current = null;
-      } catch (err) {
-        console.error("Error destroying device:", err);
-      }
+      try { deviceRef.current.destroy(); } catch (err) {}
     }
-
-    setIsHangupEnabled(false);
-    setIsRedialEnabled(true);
-    setIsCallActive(false);
-    setStatus("📴 Call ended");
-    saveCallResult("ended", "manual hangup");
+    handleCallEnd("ended", "manual hangup");
   };
 
-  // Redial
   const redial = () => {
-    console.log("🔄 Redial clicked");
-
-    if (connectionRef.current) {
-      try {
-        connectionRef.current.disconnect();
-      } catch (e) {}
-      connectionRef.current = null;
-    }
-
-    if (deviceRef.current) {
-      try {
-        deviceRef.current.destroy();
-      } catch (e) {}
-      deviceRef.current = null;
-    }
-
+    if (connectionRef.current) try { connectionRef.current.disconnect(); } catch (err) {}
+    if (deviceRef.current) try { deviceRef.current.destroy(); } catch (err) {}
     setIsHangupEnabled(false);
     setIsRedialEnabled(false);
-    setIsCallActive(false);
+    setTimeout(() => startCall(), 500);
+  };
 
-    setTimeout(() => {
-      startCall();
-    }, 500);
+  // format duration hh:mm:ss
+  const formatDuration = (sec) => {
+    const h = Math.floor(sec / 3600).toString().padStart(2, "0");
+    const m = Math.floor((sec % 3600) / 60).toString().padStart(2, "0");
+    const s = (sec % 60).toString().padStart(2, "0");
+    return `${h}:${m}:${s}`;
   };
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "#f3f4f6",
-        padding: "20px",
-        boxSizing: "border-box",
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: "500px",
-          padding: "35px 40px",
-          backgroundColor: "#ffffff",
-          borderRadius: "16px",
-          boxShadow: "0 15px 35px rgba(0,0,0,0.12)",
-          fontFamily: "Inter, system-ui, -apple-system, sans-serif",
-        }}
-      >
-        {/* Header */}
-        <h2
-          style={{
-            textAlign: "center",
-            color: "#1f2937",
-            marginBottom: "30px",
-            fontSize: "28px",
-            fontWeight: "700",
-            letterSpacing: "0.5px",
-          }}
-        >
-          📞 Orbit Dialer
-        </h2>
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#f3f4f6',
+      padding: '20px',
+      boxSizing: 'border-box'
+    }}>
+      <div style={{
+        width: '100%',
+        maxWidth: '500px',
+        padding: '35px 40px',
+        backgroundColor: '#ffffff',
+        borderRadius: '16px',
+        boxShadow: '0 15px 35px rgba(0,0,0,0.12)',
+        fontFamily: 'Inter, system-ui, -apple-system, sans-serif'
+      }}>
+        <h2 style={{
+          textAlign: 'center',
+          color: '#1f2937',
+          marginBottom: '30px',
+          fontSize: '28px',
+          fontWeight: '700',
+          letterSpacing: '0.5px'
+        }}>📞 Orbit Dialer</h2>
 
         {/* Call Status */}
-        <div
-          style={{
-            padding: "20px",
-            backgroundColor: isCallActive ? "#e6f4ea" : "#f3f4f6",
-            border: `2px solid ${isCallActive ? "#34d399" : "#d1d5db"}`,
-            borderRadius: "12px",
-            marginBottom: "25px",
-            textAlign: "center",
-            fontWeight: "600",
-            color: "#111827",
-            minHeight: "70px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: "16px",
-            transition: "all 0.2s",
-          }}
-        >
+        <div style={{
+          padding: '20px',
+          backgroundColor: isHangupEnabled ? '#e6f4ea' : '#f3f4f6',
+          border: `2px solid ${isHangupEnabled ? '#34d399' : '#d1d5db'}`,
+          borderRadius: '12px',
+          marginBottom: '15px',
+          textAlign: 'center',
+          fontWeight: '600',
+          color: '#111827',
+          minHeight: '70px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '16px',
+          transition: 'all 0.2s'
+        }}>
           {status}
+          {isHangupEnabled && callDuration > 0 && (
+            <span style={{ marginTop: '5px', fontSize: '14px', color: '#065f46' }}>
+              ⏱ {formatDuration(callDuration)}
+            </span>
+          )}
         </div>
 
-        {/* Call Duration */}
-        {isCallActive && (
-          <div
-            style={{
-              padding: "18px",
-              backgroundColor: "#fef3c7",
-              border: "2px solid #fbbf24",
-              borderRadius: "12px",
-              marginBottom: "25px",
-              textAlign: "center",
-              fontSize: "32px",
-              fontWeight: "700",
-              color: "#92400e",
-              letterSpacing: "2px",
-            }}
-          >
-            ⏱️ {formatDuration(callDuration)}
-          </div>
-        )}
-
         {/* Phone Number */}
-        <div
-          style={{
-            padding: "18px",
-            backgroundColor: "#eff6ff",
-            border: "2px solid #3b82f6",
-            borderRadius: "12px",
-            marginBottom: "30px",
-            textAlign: "center",
-            fontSize: "22px",
-            fontWeight: "700",
-            color: "#1e40af",
-            letterSpacing: "0.5px",
-          }}
-        >
+        <div style={{
+          padding: '18px',
+          backgroundColor: '#eff6ff',
+          border: '2px solid #3b82f6',
+          borderRadius: '12px',
+          marginBottom: '30px',
+          textAlign: 'center',
+          fontSize: '22px',
+          fontWeight: '700',
+          color: '#1e40af',
+          letterSpacing: '0.5px'
+        }}>
           {phoneNumber || "No number"}
         </div>
 
         {/* Buttons */}
-        <div
-          style={{
-            display: "flex",
-            gap: "15px",
-          }}
-        >
+        <div style={{ display: 'flex', gap: '15px' }}>
           <button
             onClick={redial}
             disabled={!isRedialEnabled || !phoneNumber}
             style={{
               flex: 1,
-              padding: "16px 26px",
-              fontSize: "16px",
-              fontWeight: "600",
-              border: "none",
-              borderRadius: "12px",
-              cursor:
-                !isRedialEnabled || !phoneNumber ? "not-allowed" : "pointer",
-              backgroundColor:
-                !isRedialEnabled || !phoneNumber ? "#d1d5db" : "#10b981",
-              color: "#fff",
-              transition: "all 0.2s",
-              opacity: !isRedialEnabled || !phoneNumber ? 0.6 : 1,
-              boxShadow:
-                isRedialEnabled && phoneNumber
-                  ? "0 4px 12px rgba(16, 185, 129, 0.25)"
-                  : "none",
+              padding: '16px 26px',
+              fontSize: '16px',
+              fontWeight: '600',
+              border: 'none',
+              borderRadius: '12px',
+              cursor: (!isRedialEnabled || !phoneNumber) ? 'not-allowed' : 'pointer',
+              backgroundColor: (!isRedialEnabled || !phoneNumber) ? '#d1d5db' : '#10b981',
+              color: '#fff',
+              transition: 'all 0.2s',
+              opacity: (!isRedialEnabled || !phoneNumber) ? 0.6 : 1,
+              boxShadow: (isRedialEnabled && phoneNumber)
+                ? '0 4px 12px rgba(16, 185, 129, 0.25)'
+                : 'none'
             }}
           >
             🔄 Redial
@@ -445,19 +339,19 @@ export default function App() {
             disabled={!isHangupEnabled}
             style={{
               flex: 1,
-              padding: "16px 26px",
-              fontSize: "16px",
-              fontWeight: "600",
-              border: "none",
-              borderRadius: "12px",
-              cursor: !isHangupEnabled ? "not-allowed" : "pointer",
-              backgroundColor: !isHangupEnabled ? "#d1d5db" : "#ef4444",
-              color: "#fff",
-              transition: "all 0.2s",
+              padding: '16px 26px',
+              fontSize: '16px',
+              fontWeight: '600',
+              border: 'none',
+              borderRadius: '12px',
+              cursor: !isHangupEnabled ? 'not-allowed' : 'pointer',
+              backgroundColor: !isHangupEnabled ? '#d1d5db' : '#ef4444',
+              color: '#fff',
+              transition: 'all 0.2s',
               opacity: !isHangupEnabled ? 0.6 : 1,
               boxShadow: isHangupEnabled
-                ? "0 4px 12px rgba(239, 68, 68, 0.25)"
-                : "none",
+                ? '0 4px 12px rgba(239, 68, 68, 0.25)'
+                : 'none'
             }}
           >
             📴 Hang Up
