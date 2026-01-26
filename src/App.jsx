@@ -12,7 +12,6 @@ export default function App() {
   const [customerId, setCustomerId] = useState(null);
   const [orgId, setOrgId] = useState(null);
   const [isHangupEnabled, setIsHangupEnabled] = useState(false);
-  const [isRedialEnabled, setIsRedialEnabled] = useState(true);
   const [callDuration, setCallDuration] = useState(0);
 
   const deviceRef = useRef(null);
@@ -80,7 +79,6 @@ export default function App() {
     const micOk = await checkMic();
     if (!micOk) return;
 
-    setIsRedialEnabled(false);
     setStatus("Fetching token...");
 
     const tokenRes = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
@@ -92,7 +90,6 @@ export default function App() {
     device.on("error", (err) => {
       console.error(err);
       setStatus("❌ Device error");
-      setIsRedialEnabled(true);
     });
 
     setStatus("Dialing...");
@@ -120,7 +117,6 @@ export default function App() {
 
       saveCallLog("ended", null, dur, startedAtRef.current, end);
       setIsHangupEnabled(false);
-      setIsRedialEnabled(true);
       setStatus("📴 Call ended");
     });
 
@@ -133,7 +129,6 @@ export default function App() {
 
       saveCallLog("failed", err.message, dur, startedAtRef.current, end);
       setIsHangupEnabled(false);
-      setIsRedialEnabled(true);
       setStatus("❌ Call failed");
     });
   };
@@ -207,6 +202,8 @@ export default function App() {
     border: "1px solid #ccc",
     fontSize: "16px",
     marginBottom: "15px",
+    backgroundColor: "#f0f0f0",
+    color: "#555",
   };
 
   return (
@@ -217,13 +214,12 @@ export default function App() {
         <div style={statusStyle}>{status}</div>
 
         <label style={{ fontWeight: "bold", display: "block", marginBottom: "8px" }}>
-          Enter Phone Number:
+          Phone Number:
         </label>
         <input
           type="text"
-          placeholder="+1234567890"
           value={phoneNumber}
-          onChange={(e) => setPhoneNumber(e.target.value)}
+          readOnly
           style={inputStyle}
         />
 
