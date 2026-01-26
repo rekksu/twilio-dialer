@@ -21,37 +21,37 @@ export default function App() {
   const callStartTimeRef = useRef(null);
 
   /* ---------------- SAVE CALL LOG ---------------- */
-  const saveCallResult = async (status, reason = null) => {
-    if (!callStartTimeRef.current) {
-      console.warn("No call start time, skipping duration");
-      return;
-    }
+ const saveCallResult = async (status, reason = null) => {
+  const endedAt = Date.now();
 
-    const endedAt = Date.now();
-    const durationSeconds = Math.max(
-      0,
-      Math.floor((endedAt - callStartTimeRef.current) / 1000)
-    );
+  const startedAt = callStartTimeRef.current
+    ? new Date(callStartTimeRef.current).toISOString()
+    : null;
 
-    try {
-      await fetch(CALL_LOG_FUNCTION_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: phoneNumber,
-          status,
-          reason,
-          customerId,
-          orgId,
-          startedAt: new Date(callStartTimeRef.current).toISOString(),
-          endedAt: new Date(endedAt).toISOString(),
-          durationSeconds,
-        }),
-      });
-    } catch (err) {
-      console.error("Failed to save call log", err);
-    }
-  };
+  const durationSeconds = callStartTimeRef.current
+    ? Math.max(0, Math.floor((endedAt - callStartTimeRef.current) / 1000))
+    : 0;
+
+  try {
+    await fetch(CALL_LOG_FUNCTION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: phoneNumber,
+        status,
+        reason,
+        customerId,
+        orgId,
+        startedAt,
+        endedAt: new Date(endedAt).toISOString(),
+        durationSeconds,
+      }),
+    });
+  } catch (err) {
+    console.error("Failed to save call log", err);
+  }
+};
+
 
   /* ---------------- URL PARAMS ---------------- */
   useEffect(() => {
