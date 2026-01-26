@@ -145,83 +145,108 @@ export default function App() {
 
   // --- UI STYLES ---
   const containerStyle = {
-    maxWidth: "400px",
-    margin: "50px auto",
-    padding: "20px",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    minHeight: "100vh",
+    background: "#f0f2f5",
+  };
+
+  const cardStyle = {
+    width: "400px",
+    padding: "30px",
     borderRadius: "12px",
-    boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+    boxShadow: "0 6px 20px rgba(0,0,0,0.15)",
+    background: "#fff",
     textAlign: "center",
     fontFamily: "Segoe UI, sans-serif",
-    background: "#f7f8fa",
   };
 
   const statusStyle = {
-    padding: "10px",
+    padding: "12px",
     borderRadius: "8px",
-    margin: "10px 0",
+    margin: "15px 0",
+    fontWeight: "bold",
     background:
       status.includes("❌")
-        ? "#ffcccc"
+        ? "#ffe5e5"
         : status.includes("✅")
-        ? "#ccffcc"
+        ? "#e5ffe5"
         : "#e0e0e0",
+    color:
+      status.includes("❌") ? "#d32f2f" : status.includes("✅") ? "#2e7d32" : "#000",
   };
 
   const buttonStyle = {
-    padding: "10px 20px",
-    margin: "5px",
+    padding: "12px 25px",
+    margin: "8px",
     borderRadius: "8px",
     border: "none",
     cursor: "pointer",
     fontWeight: "bold",
     fontSize: "16px",
+    transition: "all 0.2s",
   };
 
   const startButtonStyle = {
     ...buttonStyle,
-    background: "#4caf50",
+    background: "#1976d2",
     color: "#fff",
   };
 
   const hangupButtonStyle = {
     ...buttonStyle,
-    background: "#f44336",
+    background: "#d32f2f",
     color: "#fff",
+  };
+
+  const inputStyle = {
+    padding: "12px",
+    width: "90%",
+    borderRadius: "8px",
+    border: "1px solid #ccc",
+    fontSize: "16px",
+    marginBottom: "15px",
   };
 
   return (
     <div style={containerStyle}>
-      <h1>📞 Orbit Dialer</h1>
+      <div style={cardStyle}>
+        <h2>📞 CRM Orbit Dialer</h2>
 
-      <div style={statusStyle}>{status}</div>
+        <div style={statusStyle}>{status}</div>
 
-      <input
-        type="text"
-        placeholder="Enter phone number"
-        value={phoneNumber}
-        onChange={(e) => setPhoneNumber(e.target.value)}
-        style={{ padding: "10px", width: "80%", borderRadius: "8px" }}
-      />
+        <label style={{ fontWeight: "bold", display: "block", marginBottom: "8px" }}>
+          Enter Phone Number:
+        </label>
+        <input
+          type="text"
+          placeholder="+1234567890"
+          value={phoneNumber}
+          onChange={(e) => setPhoneNumber(e.target.value)}
+          style={inputStyle}
+        />
 
-      {isHangupEnabled && (
-        <p>⏱ Duration: {Math.floor(callDuration)}s</p>
-      )}
+        {isHangupEnabled && (
+          <p style={{ fontWeight: "bold" }}>⏱ Duration: {Math.floor(callDuration)}s</p>
+        )}
 
-      <div>
-        <button
-          style={startButtonStyle}
-          onClick={startCall}
-          disabled={!phoneNumber || isHangupEnabled}
-        >
-          Start Call
-        </button>
-        <button
-          style={hangupButtonStyle}
-          onClick={hangup}
-          disabled={!isHangupEnabled}
-        >
-          Hang Up
-        </button>
+        <div>
+          <button
+            style={startButtonStyle}
+            onClick={startCall}
+            disabled={!phoneNumber || isHangupEnabled}
+          >
+            Start Call
+          </button>
+          <button
+            style={hangupButtonStyle}
+            onClick={hangup}
+            disabled={!isHangupEnabled}
+          >
+            Hang Up
+          </button>
+        </div>
       </div>
     </div>
   );
