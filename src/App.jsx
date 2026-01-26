@@ -73,12 +73,21 @@ export default function App() {
     if (!connectionRef.current && !callStartTimeRef.current) return;
 
     stopCallTimer();
+
     const endedAt = Date.now();
     const durationSeconds = callStartTimeRef.current
       ? Math.floor((endedAt - callStartTimeRef.current) / 1000)
       : 0;
 
-    saveCallResult(status, reason, customerId, orgId, durationSeconds, callStartTimeRef.current, endedAt);
+    saveCallResult(
+      status,
+      reason,
+      customerId,
+      orgId,
+      durationSeconds,
+      callStartTimeRef.current,
+      endedAt
+    );
 
     connectionRef.current = null;
     callStartTimeRef.current = null;
@@ -155,14 +164,18 @@ export default function App() {
         connectionRef.current = conn;
         setIsHangupEnabled(true);
 
-        // Attach events as early as possible
-        conn.on("ringing", () => setStatus(`📞 Ringing ${formattedNumber}...`));
+        // ✅ Attach events to ensure logging always works
+        conn.on("ringing", () => {
+          setStatus(`📞 Ringing ${formattedNumber}...`);
+          if (!callStartTimeRef.current) callStartTimeRef.current = Date.now();
+        });
+
         conn.on("accept", () => {
           setStatus("✅ Call connected!");
           setIsHangupEnabled(true);
-          callStartTimeRef.current = Date.now(); // start duration
           startCallTimer();
         });
+
         conn.on("disconnect", () => handleCallEnd("ended"));
         conn.on("reject", () => handleCallEnd("rejected"));
         conn.on("cancel", () => handleCallEnd("cancelled"));
