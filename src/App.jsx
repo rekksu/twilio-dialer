@@ -29,9 +29,7 @@ export default function App() {
     reason = null,
     customerIdVal = customerId,
     orgIdVal = orgId,
-    startedAt = null,
-    endedAt = null,
-    durationSeconds = 0
+    duration = null
   ) => {
     try {
       await fetch(CALL_LOG_FUNCTION_URL, {
@@ -41,18 +39,15 @@ export default function App() {
           to: phoneNumber,
           status,
           reason,
-          customerId: customerIdVal,
-          orgId: orgIdVal,
-          startedAt,
-          endedAt,
-          durationSeconds,
+          customerId: customerIdVal || null, // log even if missing
+          orgId: orgIdVal || null,           // log even if missing
+          duration,                          // in seconds
         }),
       });
     } catch (err) {
       console.error("Failed to save call log", err);
     }
   };
-
 
 
   // Get number, customerId, orgId from URL
@@ -161,8 +156,8 @@ export default function App() {
             console.log("✓ Call connected!");
             setStatus("✅ Call connected!");
             setIsHangupEnabled(true);
-            callStartTimeRef.current = Date.now();
 
+            callStartTimeRef.current = Date.now(); // ✅ Start timer
           });
 
           conn.on("disconnect", () => {
@@ -170,29 +165,16 @@ export default function App() {
             setStatus("📴 Call ended");
             setIsHangupEnabled(false);
             setIsRedialEnabled(true);
-
-            // Get Twilio duration in seconds
-            let durationSeconds = 0;
-            try {
-              if (conn && typeof conn.duration === "number") {
-                durationSeconds = conn.duration; // Twilio automatically tracks this
-              }
-            } catch (err) {
-              console.warn("Failed to get duration from Twilio:", err);
-            }
-
-            // Send call log with duration
-            saveCallResult(
-              "ended",
-              null,
-              customerId,
-              orgId,
-              null,  // startedAt (optional)
-              null,  // endedAt (optional)
-              durationSeconds
-            );
-
             connectionRef.current = null;
+
+            let duration = null;
+            if (callStartTimeRef.current) {
+              duration = Math.round((Date.now() - callStartTimeRef.current) / 1000); // seconds
+            }
+            saveCallResult("ended", null, customerId, orgId, duration);
+
+
+            saveCallResult("ended"); // ✅ log with customerId/orgId
           });
 
           conn.on("error", (err) => {
@@ -239,6 +221,12 @@ export default function App() {
     console.log("🔴 HANGUP CLICKED!");
     console.log("Connection exists:", !!connectionRef.current);
     console.log("Device exists:", !!deviceRef.current);
+
+    let duration = null;
+    if (callStartTimeRef.current) {
+      duration = Math.round((Date.now() - callStartTimeRef.current) / 1000);
+    }
+    saveCallResult("ended", "manual hangup", customerId, orgId, duration);
 
     setStatus("Hanging up...");
 
@@ -421,5 +409,6 @@ export default function App() {
 
   );
 }
+
 
 
