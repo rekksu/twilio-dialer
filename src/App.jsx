@@ -143,19 +143,86 @@ export default function App() {
     setIsHangupEnabled(false);
   };
 
+  // --- UI STYLES ---
+  const containerStyle = {
+    maxWidth: "400px",
+    margin: "50px auto",
+    padding: "20px",
+    borderRadius: "12px",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+    textAlign: "center",
+    fontFamily: "Segoe UI, sans-serif",
+    background: "#f7f8fa",
+  };
+
+  const statusStyle = {
+    padding: "10px",
+    borderRadius: "8px",
+    margin: "10px 0",
+    background:
+      status.includes("❌")
+        ? "#ffcccc"
+        : status.includes("✅")
+        ? "#ccffcc"
+        : "#e0e0e0",
+  };
+
+  const buttonStyle = {
+    padding: "10px 20px",
+    margin: "5px",
+    borderRadius: "8px",
+    border: "none",
+    cursor: "pointer",
+    fontWeight: "bold",
+    fontSize: "16px",
+  };
+
+  const startButtonStyle = {
+    ...buttonStyle,
+    background: "#4caf50",
+    color: "#fff",
+  };
+
+  const hangupButtonStyle = {
+    ...buttonStyle,
+    background: "#f44336",
+    color: "#fff",
+  };
+
   return (
-    <div>
+    <div style={containerStyle}>
       <h1>📞 Orbit Dialer</h1>
-      <p>{status}</p>
+
+      <div style={statusStyle}>{status}</div>
+
+      <input
+        type="text"
+        placeholder="Enter phone number"
+        value={phoneNumber}
+        onChange={(e) => setPhoneNumber(e.target.value)}
+        style={{ padding: "10px", width: "80%", borderRadius: "8px" }}
+      />
+
       {isHangupEnabled && (
         <p>⏱ Duration: {Math.floor(callDuration)}s</p>
       )}
-      <button onClick={startCall} disabled={!phoneNumber || isHangupEnabled}>
-        Start Call
-      </button>
-      <button onClick={hangup} disabled={!isHangupEnabled}>
-        Hang Up
-      </button>
+
+      <div>
+        <button
+          style={startButtonStyle}
+          onClick={startCall}
+          disabled={!phoneNumber || isHangupEnabled}
+        >
+          Start Call
+        </button>
+        <button
+          style={hangupButtonStyle}
+          onClick={hangup}
+          disabled={!isHangupEnabled}
+        >
+          Hang Up
+        </button>
+      </div>
     </div>
   );
 }
