@@ -13,7 +13,7 @@ export default function App() {
   const [orgId, setOrgId] = useState(null);
   const [isHangupEnabled, setIsHangupEnabled] = useState(false);
   const [isRedialEnabled, setIsRedialEnabled] = useState(true);
-  const [callDuration, setCallDuration] = useState(0); // live duration
+  const [callDuration, setCallDuration] = useState(0);
 
   const deviceRef = useRef(null);
   const connectionRef = useRef(null);
@@ -21,7 +21,7 @@ export default function App() {
   const durationIntervalRef = useRef(null);
 
   // -------------------------------
-  // Helper to save call logs
+  // Save call log helper
   const saveCallResult = async (
     status,
     reason = null,
@@ -46,36 +46,14 @@ export default function App() {
           durationSeconds,
         }),
       });
+      console.log("Call log saved:", status, durationSeconds);
     } catch (err) {
       console.error("Failed to save call log", err);
     }
   };
 
-  const handleCallEnd = (status, reason = null) => {
-    const endedAt = Date.now();
-    const durationSeconds = callStartTimeRef.current
-      ? Math.floor((endedAt - callStartTimeRef.current) / 1000)
-      : 0;
-
-    stopCallTimer();
-    saveCallResult(
-      status,
-      reason,
-      customerId,
-      orgId,
-      durationSeconds,
-      callStartTimeRef.current,
-      endedAt
-    );
-
-    callStartTimeRef.current = null;
-    connectionRef.current = null;
-    setIsHangupEnabled(false);
-    setIsRedialEnabled(true);
-    setCallDuration(0);
-    setStatus("📴 Call ended");
-  };
-
+  // -------------------------------
+  // Start/stop live call timer
   const startCallTimer = () => {
     if (!callStartTimeRef.current) callStartTimeRef.current = Date.now();
     setCallDuration(0);
@@ -87,6 +65,27 @@ export default function App() {
   const stopCallTimer = () => {
     if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
     durationIntervalRef.current = null;
+  };
+
+  // -------------------------------
+  // Unified call end handler
+  const handleCallEnd = (status, reason = null) => {
+    if (!connectionRef.current && !callStartTimeRef.current) return;
+
+    stopCallTimer();
+    const endedAt = Date.now();
+    const durationSeconds = callStartTimeRef.current
+      ? Math.floor((endedAt - callStartTimeRef.current) / 1000)
+      : 0;
+
+    saveCallResult(status, reason, customerId, orgId, durationSeconds, callStartTimeRef.current, endedAt);
+
+    connectionRef.current = null;
+    callStartTimeRef.current = null;
+    setIsHangupEnabled(false);
+    setIsRedialEnabled(true);
+    setCallDuration(0);
+    setStatus("📴 Call ended");
   };
 
   // -------------------------------
@@ -109,7 +108,7 @@ export default function App() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach(track => track.stop());
       return true;
-    } catch (err) {
+    } catch {
       setStatus("❌ Microphone access denied");
       return false;
     }
@@ -156,23 +155,18 @@ export default function App() {
         connectionRef.current = conn;
         setIsHangupEnabled(true);
 
-        // Wait a tiny bit to attach events
-        setTimeout(() => {
-          if (!conn || !conn.on) return;
-
-          conn.on("ringing", () => setStatus(`📞 Ringing ${formattedNumber}...`));
-
-          conn.on("accept", () => {
-            setStatus("✅ Call connected!");
-            setIsHangupEnabled(true);
-            startCallTimer(); // ✅ start duration when call is accepted
-          });
-
-          conn.on("disconnect", () => handleCallEnd("ended"));
-          conn.on("error", (err) => handleCallEnd("failed", err.message));
-          conn.on("reject", () => handleCallEnd("rejected"));
-          conn.on("cancel", () => handleCallEnd("cancelled"));
-        }, 50);
+        // Attach events as early as possible
+        conn.on("ringing", () => setStatus(`📞 Ringing ${formattedNumber}...`));
+        conn.on("accept", () => {
+          setStatus("✅ Call connected!");
+          setIsHangupEnabled(true);
+          callStartTimeRef.current = Date.now(); // start duration
+          startCallTimer();
+        });
+        conn.on("disconnect", () => handleCallEnd("ended"));
+        conn.on("reject", () => handleCallEnd("rejected"));
+        conn.on("cancel", () => handleCallEnd("cancelled"));
+        conn.on("error", (err) => handleCallEnd("failed", err.message));
       });
 
       twilioDevice.register();
@@ -199,7 +193,6 @@ export default function App() {
     setTimeout(() => startCall(), 500);
   };
 
-  // format duration hh:mm:ss
   const formatDuration = (sec) => {
     const h = Math.floor(sec / 3600).toString().padStart(2, "0");
     const m = Math.floor((sec % 3600) / 60).toString().padStart(2, "0");
