@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Device } from "@twilio/voice-sdk";
 
-const CLOUD_FUNCTION_URL =
-  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
-const CALL_LOG_FUNCTION_URL =
-  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/createCallLog";
+const CLOUD_FUNCTION_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
+const CALL_LOG_FUNCTION_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/createCallLog";
 
 export default function App() {
   const [status, setStatus] = useState("Initializing...");
@@ -25,8 +23,6 @@ export default function App() {
   const saveCallResult = async (
     status,
     reason = null,
-    customerIdVal = customerId,
-    orgIdVal = orgId,
     durationSeconds = 0,
     startedAt = null,
     endedAt = null
@@ -39,8 +35,8 @@ export default function App() {
           to: phoneNumber,
           status,
           reason,
-          customerId: customerIdVal || null,
-          orgId: orgIdVal || null,
+          customerId: customerId || null,
+          orgId: orgId || null,
           startedAt: startedAt ? new Date(startedAt).toISOString() : null,
           endedAt: endedAt ? new Date(endedAt).toISOString() : null,
           durationSeconds,
@@ -53,7 +49,6 @@ export default function App() {
   };
 
   // -------------------------------
-  // Start/stop live call timer
   const startCallTimer = () => {
     if (!callStartTimeRef.current) callStartTimeRef.current = Date.now();
     setCallDuration(0);
@@ -68,7 +63,6 @@ export default function App() {
   };
 
   // -------------------------------
-  // Unified call end handler
   const handleCallEnd = (status, reason = null) => {
     stopCallTimer();
     const endedAt = Date.now();
@@ -76,15 +70,7 @@ export default function App() {
       ? Math.floor((endedAt - callStartTimeRef.current) / 1000)
       : 0;
 
-    saveCallResult(
-      status,
-      reason,
-      customerId,
-      orgId,
-      durationSeconds,
-      callStartTimeRef.current,
-      endedAt
-    );
+    saveCallResult(status, reason, durationSeconds, callStartTimeRef.current, endedAt);
 
     connectionRef.current = null;
     callStartTimeRef.current = null;
@@ -95,7 +81,6 @@ export default function App() {
   };
 
   // -------------------------------
-  // Get number, customerId, orgId from URL
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const urlNumber = urlParams.get("to");
@@ -112,7 +97,7 @@ export default function App() {
   const checkMicPermission = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach(track => track.stop());
+      stream.getTracks().forEach((track) => track.stop());
       return true;
     } catch {
       setStatus("❌ Microphone access denied");
@@ -127,7 +112,6 @@ export default function App() {
   };
 
   // -------------------------------
-  // Start call manually
   const startCall = async () => {
     if (!phoneNumber) return;
     const formattedNumber = formatPhoneNumber(phoneNumber);
@@ -155,26 +139,28 @@ export default function App() {
         setIsRedialEnabled(true);
       });
 
-      // Listen for connections globally
+      // Global connect/disconnect
       twilioDevice.on("connect", (conn) => {
         connectionRef.current = conn;
         setIsHangupEnabled(true);
         setStatus("✅ Call connected!");
-        callStartTimeRef.current = Date.now(); // Start duration
+        callStartTimeRef.current = Date.now();
         startCallTimer();
 
         conn.on("disconnect", () => handleCallEnd("ended"));
         conn.on("error", (err) => handleCallEnd("failed", err.message));
       });
 
-      twilioDevice.on("disconnect", () => {
-        handleCallEnd("ended");
-      });
+      twilioDevice.on("disconnect", () => handleCallEnd("ended"));
 
       twilioDevice.register();
 
       setStatus(`📞 Dialing ${formattedNumber}...`);
-      twilioDevice.connect({ params: { To: formattedNumber } });
+      // Save call start immediately (even if client hangs up before accept)
+      const conn = twilioDevice.connect({ params: { To: formattedNumber } });
+      connectionRef.current = conn;
+      callStartTimeRef.current = Date.now(); // important for duration even if client hangs up
+      setIsHangupEnabled(true);
 
     } catch (err) {
       console.error("Error starting call:", err);
