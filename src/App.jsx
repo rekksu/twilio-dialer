@@ -71,6 +71,11 @@ export default function App() {
     setCustomerId(urlParams.get("customerId"));
     setOrgId(urlParams.get("orgId"));
     setStatus("Ready to call");
+
+    // Ensure HTML and body take full height
+    document.documentElement.style.height = "100%";
+    document.body.style.height = "100%";
+    document.body.style.margin = "0";
   }, []);
 
   const startCall = async () => {
@@ -143,7 +148,7 @@ export default function App() {
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
-    minHeight: "100vh",
+    height: "100vh", 
     background: "#f0f2f5",
   };
 
@@ -216,12 +221,7 @@ export default function App() {
         <label style={{ fontWeight: "bold", display: "block", marginBottom: "8px" }}>
           Phone Number:
         </label>
-        <input
-          type="text"
-          value={phoneNumber}
-          readOnly
-          style={inputStyle}
-        />
+        <input type="text" value={phoneNumber} readOnly style={inputStyle} />
 
         {isHangupEnabled && (
           <p style={{ fontWeight: "bold" }}>⏱ Duration: {Math.floor(callDuration)}s</p>
