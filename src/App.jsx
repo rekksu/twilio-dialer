@@ -25,29 +25,29 @@ export default function App() {
 
   // Helper to save call logs
   const saveCallResult = async (
-    status,
-    reason = null,
-    customerIdVal = customerId,
-    orgIdVal = orgId,
-    duration = null
-  ) => {
-    try {
-      await fetch(CALL_LOG_FUNCTION_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: phoneNumber,
-          status,
-          reason,
-          customerId: customerIdVal || null, // log even if missing
-          orgId: orgIdVal || null,           // log even if missing
-          duration,                          // in seconds
-        }),
-      });
-    } catch (err) {
-      console.error("Failed to save call log", err);
-    }
-  };
+  status,
+  reason = null,
+  customerIdVal = customerId,
+  orgIdVal = orgId,
+  duration = null
+) => {
+  try {
+    await fetch(CALL_LOG_FUNCTION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: phoneNumber,
+        status,
+        reason,
+        customerId: customerIdVal || null, // log even if missing
+        orgId: orgIdVal || null,           // log even if missing
+        duration,                          // in seconds
+      }),
+    });
+  } catch (err) {
+    console.error("Failed to save call log", err);
+  }
+};
 
 
   // Get number, customerId, orgId from URL
@@ -221,13 +221,6 @@ export default function App() {
     console.log("🔴 HANGUP CLICKED!");
     console.log("Connection exists:", !!connectionRef.current);
     console.log("Device exists:", !!deviceRef.current);
-
-    let duration = null;
-    if (callStartTimeRef.current) {
-      duration = Math.round((Date.now() - callStartTimeRef.current) / 1000);
-    }
-    saveCallResult("ended", "manual hangup", customerId, orgId, duration);
-
     setStatus("Hanging up...");
 
     if (connectionRef.current) {
