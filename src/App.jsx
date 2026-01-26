@@ -70,10 +70,7 @@ export default function App() {
   // -------------------------------
   // Unified call end handler
   const handleCallEnd = (status, reason = null) => {
-    if (!connectionRef.current && !callStartTimeRef.current) return;
-
     stopCallTimer();
-
     const endedAt = Date.now();
     const durationSeconds = callStartTimeRef.current
       ? Math.floor((endedAt - callStartTimeRef.current) / 1000)
@@ -148,7 +145,7 @@ export default function App() {
       const token = data.token;
 
       setStatus("🔄 Setting up device...");
-      const twilioDevice = new Device(token, { enableRingingState: true, codecPreferences: ["opus", "pcmu"] });
+      const twilioDevice = new Device(token, { enableRingingState: true });
       deviceRef.current = twilioDevice;
 
       twilioDevice.on("error", (err) => {
@@ -158,31 +155,27 @@ export default function App() {
         setIsRedialEnabled(true);
       });
 
-      twilioDevice.on("registered", () => {
-        setStatus(`📞 Dialing ${formattedNumber}...`);
-        const conn = twilioDevice.connect({ params: { To: formattedNumber } });
+      // Listen for connections globally
+      twilioDevice.on("connect", (conn) => {
         connectionRef.current = conn;
         setIsHangupEnabled(true);
-
-        // ✅ Attach events to ensure logging always works
-        conn.on("ringing", () => {
-          setStatus(`📞 Ringing ${formattedNumber}...`);
-          if (!callStartTimeRef.current) callStartTimeRef.current = Date.now();
-        });
-
-        conn.on("accept", () => {
-          setStatus("✅ Call connected!");
-          setIsHangupEnabled(true);
-          startCallTimer();
-        });
+        setStatus("✅ Call connected!");
+        callStartTimeRef.current = Date.now(); // Start duration
+        startCallTimer();
 
         conn.on("disconnect", () => handleCallEnd("ended"));
-        conn.on("reject", () => handleCallEnd("rejected"));
-        conn.on("cancel", () => handleCallEnd("cancelled"));
         conn.on("error", (err) => handleCallEnd("failed", err.message));
       });
 
+      twilioDevice.on("disconnect", () => {
+        handleCallEnd("ended");
+      });
+
       twilioDevice.register();
+
+      setStatus(`📞 Dialing ${formattedNumber}...`);
+      twilioDevice.connect({ params: { To: formattedNumber } });
+
     } catch (err) {
       console.error("Error starting call:", err);
       setStatus(`❌ Error: ${err.message}`);
