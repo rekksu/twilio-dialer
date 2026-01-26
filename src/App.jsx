@@ -72,7 +72,7 @@ export default function App() {
     setOrgId(urlParams.get("orgId"));
     setStatus("Ready to call");
 
-    // Ensure HTML and body take full height
+    // Ensure HTML/body take full height
     document.documentElement.style.height = "100%";
     document.body.style.height = "100%";
     document.body.style.margin = "0";
@@ -143,13 +143,18 @@ export default function App() {
     setIsHangupEnabled(false);
   };
 
-  // --- UI STYLES ---
+  // --- STYLES ---
   const containerStyle = {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    width: "100vw",
+    height: "100vh",
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
-    height: "100vh", 
     background: "#f0f2f5",
+    zIndex: 9999,
   };
 
   const cardStyle = {
