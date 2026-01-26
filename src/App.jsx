@@ -28,14 +28,12 @@ export default function App() {
   status,
   reason = null,
   customerIdVal = customerId,
-  orgIdVal = orgId
+  orgIdVal = orgId,
+  startedAt = null,
+  endedAt = null,
+  durationSeconds = 0
 ) => {
   try {
-    const endedAt = Date.now();
-    const durationSeconds = callStartTimeRef.current
-      ? Math.floor((endedAt - callStartTimeRef.current) / 1000)
-      : 0;
-
     await fetch(CALL_LOG_FUNCTION_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -43,19 +41,18 @@ export default function App() {
         to: phoneNumber,
         status,
         reason,
-        customerId: customerIdVal || null,
-        orgId: orgIdVal || null,
-        startedAt: callStartTimeRef.current
-          ? new Date(callStartTimeRef.current).toISOString()
-          : null,
-        endedAt: new Date(endedAt).toISOString(),
-        durationSeconds
+        customerId: customerIdVal,
+        orgId: orgIdVal,
+        startedAt,
+        endedAt,
+        durationSeconds,
       }),
     });
   } catch (err) {
     console.error("Failed to save call log", err);
   }
 };
+
 
 
   // Get number, customerId, orgId from URL
@@ -175,7 +172,15 @@ export default function App() {
             setIsRedialEnabled(true);
             connectionRef.current = null;
 
-            saveCallResult("ended"); // ✅ log with customerId/orgId
+             const endedAt = new Date().getTime();
+  const durationSeconds = callStartTimeRef.current
+    ? Math.floor((endedAt - callStartTimeRef.current) / 1000)
+    : 0;
+
+  saveCallResult("ended", null, customerId, orgId, callStartTimeRef.current, endedAt, durationSeconds);
+
+  // reset start time
+  callStartTimeRef.current = null;
           });
 
           conn.on("error", (err) => {
