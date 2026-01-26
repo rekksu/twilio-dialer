@@ -25,29 +25,29 @@ export default function App() {
 
   // Helper to save call logs
   const saveCallResult = async (
-  status,
-  reason = null,
-  customerIdVal = customerId,
-  orgIdVal = orgId,
-  duration = null
-) => {
-  try {
-    await fetch(CALL_LOG_FUNCTION_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        to: phoneNumber,
-        status,
-        reason,
-        customerId: customerIdVal || null, // log even if missing
-        orgId: orgIdVal || null,           // log even if missing
-        duration,                          // in seconds
-      }),
-    });
-  } catch (err) {
-    console.error("Failed to save call log", err);
-  }
-};
+    status,
+    reason = null,
+    customerIdVal = customerId,
+    orgIdVal = orgId,
+    duration = null
+  ) => {
+    try {
+      await fetch(CALL_LOG_FUNCTION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: phoneNumber,
+          status,
+          reason,
+          customerId: customerIdVal || null, // log even if missing
+          orgId: orgIdVal || null,           // log even if missing
+          duration,                          // in seconds
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to save call log", err);
+    }
+  };
 
 
   // Get number, customerId, orgId from URL
@@ -157,24 +157,18 @@ export default function App() {
             setStatus("✅ Call connected!");
             setIsHangupEnabled(true);
 
-            callStartTimeRef.current = Date.now(); // ✅ Start timer
+            conn.startTime = Date.now();
           });
 
-          conn.on("disconnect", () => {
+          conn.on("disconnect", async () => {
             console.log("Call ended");
             setStatus("📴 Call ended");
             setIsHangupEnabled(false);
             setIsRedialEnabled(true);
             connectionRef.current = null;
 
-            let duration = null;
-            if (callStartTimeRef.current) {
-              duration = Math.round((Date.now() - callStartTimeRef.current) / 1000); // seconds
-            }
-            saveCallResult("ended", null, customerId, orgId, duration);
-
-
-            saveCallResult("ended"); // ✅ log with customerId/orgId
+            // send callSid to cloud function
+            await saveCallResult("ended", null, customerId, orgId, conn.callSid);
           });
 
           conn.on("error", (err) => {
