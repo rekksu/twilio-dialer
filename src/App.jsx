@@ -14,59 +14,78 @@ export default function App() {
   const [orgId, setOrgId] = useState(null);
   const [isHangupEnabled, setIsHangupEnabled] = useState(false);
   const [isRedialEnabled, setIsRedialEnabled] = useState(true);
+  const [debugLog, setDebugLog] = useState([]);
   
   const deviceRef = useRef(null);
   const connectionRef = useRef(null);
   const hasAutoStartedRef = useRef(false);
   const callStartTimeRef = useRef(null);
 
+  const addDebugLog = (message) => {
+    const timestamp = new Date().toLocaleTimeString();
+    console.log(`[${timestamp}] ${message}`);
+    setDebugLog(prev => [...prev, `${timestamp}: ${message}`].slice(-10));
+  };
+
   // Helper to save call logs
   const saveCallResult = async (status, reason = null) => {
     try {
       const endedAt = Date.now();
       
-      // ✅ Calculate duration properly
       let durationSeconds = 0;
       if (callStartTimeRef.current) {
         durationSeconds = Math.floor((endedAt - callStartTimeRef.current) / 1000);
       }
 
-      console.log("📊 Saving call log:", {
+      const payload = {
         to: phoneNumber,
         status,
         reason,
-        customerId,
-        orgId,
-        startedAt: callStartTimeRef.current,
-        endedAt,
+        customerId: customerId || null,
+        orgId: orgId || null,
+        startedAt: callStartTimeRef.current
+          ? new Date(callStartTimeRef.current).toISOString()
+          : null,
+        endedAt: new Date(endedAt).toISOString(),
         durationSeconds
-      });
+      };
+
+      addDebugLog(`📤 Sending to ${CALL_LOG_FUNCTION_URL}`);
+      addDebugLog(`📊 Payload: ${JSON.stringify(payload, null, 2)}`);
 
       const response = await fetch(CALL_LOG_FUNCTION_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: phoneNumber,
-          status,
-          reason,
-          customerId: customerId || null,
-          orgId: orgId || null,
-          startedAt: callStartTimeRef.current
-            ? new Date(callStartTimeRef.current).toISOString()
-            : null,
-          endedAt: new Date(endedAt).toISOString(),
-          durationSeconds
-        }),
+        headers: { 
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
       });
 
-      const result = await response.json();
-      console.log("✅ Call log saved:", result);
+      addDebugLog(`📨 Response status: ${response.status}`);
       
-      // ✅ Reset start time after saving
+      const responseText = await response.text();
+      addDebugLog(`📨 Response body: ${responseText}`);
+
+      let result;
+      try {
+        result = JSON.parse(responseText);
+        addDebugLog(`✅ Parsed response: ${JSON.stringify(result)}`);
+      } catch (e) {
+        addDebugLog(`⚠️ Could not parse response as JSON`);
+      }
+
+      if (!response.ok) {
+        addDebugLog(`❌ HTTP Error: ${response.status}`);
+        throw new Error(`HTTP ${response.status}: ${responseText}`);
+      }
+
+      addDebugLog(`✅ Call log saved successfully!`);
+      
       callStartTimeRef.current = null;
       
     } catch (err) {
-      console.error("❌ Failed to save call log:", err);
+      addDebugLog(`❌ Error saving call log: ${err.message}`);
+      console.error("Full error:", err);
     }
   };
 
@@ -80,12 +99,20 @@ export default function App() {
     if (urlNumber) {
       setPhoneNumber(urlNumber);
       setStatus("Ready to call");
+      addDebugLog(`📞 Phone number from URL: ${urlNumber}`);
     } else {
       setStatus("❌ No phone number in URL (?to=+1234567890)");
+      addDebugLog("❌ No phone number in URL");
     }
 
-    if (urlCustomerId) setCustomerId(urlCustomerId);
-    if (urlOrgId) setOrgId(urlOrgId);
+    if (urlCustomerId) {
+      setCustomerId(urlCustomerId);
+      addDebugLog(`👤 Customer ID: ${urlCustomerId}`);
+    }
+    if (urlOrgId) {
+      setOrgId(urlOrgId);
+      addDebugLog(`🏢 Org ID: ${urlOrgId}`);
+    }
   }, []);
 
   // Auto-start call when phone number is available
@@ -150,7 +177,7 @@ export default function App() {
       });
 
       twilioDevice.on("registered", () => {
-        console.log("✓ Device registered");
+        addDebugLog("✓ Device registered");
         setStatus(`📞 Dialing ${formattedNumber}...`);
         
         const callParams = { 
@@ -168,33 +195,30 @@ export default function App() {
           }
 
           conn.on("ringing", () => {
-            console.log("📞 Ringing...");
+            addDebugLog("📞 Ringing...");
             setStatus(`📞 Ringing ${formattedNumber}...`);
           });
 
           conn.on("accept", () => {
-            console.log("✓ Call connected!");
-            // ✅ Set start time when call is ACTUALLY connected
             callStartTimeRef.current = Date.now();
-            console.log("⏱️ Call started at:", new Date(callStartTimeRef.current).toISOString());
+            addDebugLog(`✅ Call connected at ${new Date(callStartTimeRef.current).toISOString()}`);
             setStatus("✅ Call connected!");
             setIsHangupEnabled(true);
           });
 
           conn.on("disconnect", () => {
-            console.log("📴 Call ended - saving log...");
+            addDebugLog("📴 Call disconnected - saving log...");
             setStatus("📴 Call ended");
             setIsHangupEnabled(false);
             setIsRedialEnabled(true);
             
-            // ✅ Save the call result
             saveCallResult("ended");
             
             connectionRef.current = null;
           });
 
           conn.on("error", (err) => {
-            console.error("Call error:", err);
+            addDebugLog(`❌ Call error: ${err.message}`);
             setStatus(`❌ Call failed: ${err.message}`);
             setIsHangupEnabled(false);
             setIsRedialEnabled(true);
@@ -205,7 +229,7 @@ export default function App() {
           });
 
           conn.on("reject", () => {
-            console.log("Call rejected");
+            addDebugLog("❌ Call rejected");
             setStatus("❌ Call rejected");
             setIsHangupEnabled(false);
             setIsRedialEnabled(true);
@@ -216,7 +240,7 @@ export default function App() {
           });
 
           conn.on("cancel", () => {
-            console.log("Call cancelled");
+            addDebugLog("📴 Call cancelled");
             setStatus("Call cancelled");
             setIsHangupEnabled(false);
             setIsRedialEnabled(true);
@@ -236,10 +260,7 @@ export default function App() {
   };
 
   const hangup = () => {
-    console.log("🔴 HANGUP CLICKED!");
-    console.log("Connection exists:", !!connectionRef.current);
-    console.log("Device exists:", !!deviceRef.current);
-    
+    addDebugLog("🔴 Hangup clicked");
     setStatus("Hanging up...");
     
     if (connectionRef.current) {
@@ -263,12 +284,10 @@ export default function App() {
     setIsHangupEnabled(false);
     setIsRedialEnabled(true);
     setStatus("📴 Call ended");
-
-    // ✅ Save will happen in disconnect event
   };
 
   const redial = () => {
-    console.log("🔄 Redial clicked");
+    addDebugLog("🔄 Redial clicked");
     
     if (connectionRef.current) {
       try {
@@ -304,11 +323,12 @@ export default function App() {
       justifyContent: 'center',
       backgroundColor: '#f3f4f6',
       padding: '20px',
-      boxSizing: 'border-box'
+      boxSizing: 'border-box',
+      overflow: 'auto'
     }}>
       <div style={{
         width: '100%',
-        maxWidth: '500px',
+        maxWidth: '600px',
         padding: '35px 40px',
         backgroundColor: '#ffffff',
         borderRadius: '16px',
@@ -363,7 +383,8 @@ export default function App() {
 
         <div style={{
           display: 'flex',
-          gap: '15px'
+          gap: '15px',
+          marginBottom: '30px'
         }}>
           <button
             onClick={redial}
@@ -410,6 +431,31 @@ export default function App() {
           >
             📴 Hang Up
           </button>
+        </div>
+
+        {/* Debug Log */}
+        <div style={{
+          padding: '15px',
+          backgroundColor: '#1f2937',
+          borderRadius: '8px',
+          maxHeight: '300px',
+          overflowY: 'auto',
+          fontFamily: 'monospace',
+          fontSize: '12px',
+          color: '#10b981'
+        }}>
+          <div style={{ color: '#9ca3af', marginBottom: '10px', fontWeight: 'bold' }}>
+            🔍 Debug Log (check browser console for details):
+          </div>
+          {debugLog.length === 0 ? (
+            <div style={{ color: '#6b7280' }}>Waiting for events...</div>
+          ) : (
+            debugLog.map((log, idx) => (
+              <div key={idx} style={{ marginBottom: '5px' }}>
+                {log}
+              </div>
+            ))
+          )}
         </div>
 
       </div>
