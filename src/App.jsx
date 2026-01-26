@@ -20,29 +20,43 @@ export default function App() {
   const connectionRef = useRef(null);
   const hasAutoStartedRef = useRef(false);
 
+  const callStartTimeRef = useRef(null);
+
+
   // Helper to save call logs
-  const saveCallResult = async (
-    status,
-    reason = null,
-    customerIdVal = customerId,
-    orgIdVal = orgId
-  ) => {
-    try {
-      await fetch(CALL_LOG_FUNCTION_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: phoneNumber,
-          status,
-          reason,
-          customerId: customerIdVal,
-          orgId: orgIdVal,
-        }),
-      });
-    } catch (err) {
-      console.error("Failed to save call log", err);
-    }
-  };
+ const saveCallResult = async (
+  status,
+  reason = null,
+  customerIdVal = customerId,
+  orgIdVal = orgId
+) => {
+  try {
+    const endedAt = Date.now();
+    const durationSeconds = callStartTimeRef.current
+      ? Math.floor((endedAt - callStartTimeRef.current) / 1000)
+      : 0;
+
+    await fetch(CALL_LOG_FUNCTION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: phoneNumber,
+        status,
+        reason,
+        customerId: customerIdVal || null,
+        orgId: orgIdVal || null,
+        startedAt: callStartTimeRef.current
+          ? new Date(callStartTimeRef.current).toISOString()
+          : null,
+        endedAt: new Date(endedAt).toISOString(),
+        durationSeconds
+      }),
+    });
+  } catch (err) {
+    console.error("Failed to save call log", err);
+  }
+};
+
 
   // Get number, customerId, orgId from URL
   useEffect(() => {
@@ -150,6 +164,8 @@ export default function App() {
             console.log("✓ Call connected!");
             setStatus("✅ Call connected!");
             setIsHangupEnabled(true);
+            callStartTimeRef.current = Date.now();
+
           });
 
           conn.on("disconnect", () => {
