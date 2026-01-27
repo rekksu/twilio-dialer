@@ -16,7 +16,7 @@ export default function InboundAgent() {
     try {
       setStatus("Initializing...");
 
-      // 🔑 MUST resume AudioContext on user gesture
+      // 🔑 Resume AudioContext on user gesture
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
       await audioContext.resume();
 
@@ -83,7 +83,7 @@ export default function InboundAgent() {
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-        <h2>📞 Inbound Agent</h2>
+        <h2 style={styles.title}>📞 Inbound Agent</h2>
 
         <div style={styles.status}>{status}</div>
 
@@ -94,7 +94,7 @@ export default function InboundAgent() {
 
         {/* Incoming call UI */}
         {incoming && (
-          <div>
+          <div style={styles.incomingContainer}>
             <button style={styles.acceptButton} onClick={acceptCall}>
               Accept
             </button>
@@ -123,6 +123,12 @@ const styles = {
     borderRadius: 12,
     boxShadow: "0 6px 20px rgba(0,0,0,0.15)",
     textAlign: "center",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center", // center all content horizontally
+  },
+  title: {
+    marginBottom: 20,
   },
   status: {
     margin: "15px 0",
@@ -130,6 +136,8 @@ const styles = {
     borderRadius: 8,
     background: "#e0e0e0",
     fontWeight: "bold",
+    width: "100%",
+    textAlign: "center",
   },
   startButton: {
     background: "#1976d2",
@@ -139,16 +147,23 @@ const styles = {
     borderRadius: 8,
     cursor: "pointer",
     fontWeight: "bold",
-    marginBottom: 10,
+    marginBottom: 15,
+  },
+  incomingContainer: {
+    display: "flex",
+    justifyContent: "center",
+    gap: "15px", // space between Accept and Reject buttons
+    marginTop: 15,
+    flexWrap: "wrap", // mobile-friendly: stack buttons if narrow
   },
   acceptButton: {
     background: "#2e7d32",
     color: "#fff",
     padding: "10px 20px",
-    marginRight: 10,
     border: "none",
     borderRadius: 8,
     cursor: "pointer",
+    fontWeight: "bold",
   },
   rejectButton: {
     background: "#d32f2f",
@@ -157,5 +172,6 @@ const styles = {
     border: "none",
     borderRadius: 8,
     cursor: "pointer",
+    fontWeight: "bold",
   },
 };
