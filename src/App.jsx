@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
 
 const TOKEN_URL =
@@ -7,70 +7,69 @@ const TOKEN_URL =
 export default function App() {
   const deviceRef = useRef(null);
   const callRef = useRef(null);
-  const [status, setStatus] = useState("Initializing...");
+  const [status, setStatus] = useState("Click Start Phone");
 
-  useEffect(() => {
-    const initDevice = async () => {
-      try {
-        console.log("Fetching token...");
-        const res = await fetch(TOKEN_URL);
-        const data = await res.json();
+  const startPhone = async () => {
+    try {
+      setStatus("Starting...");
 
-        if (!data.token) {
-          throw new Error("No token returned");
-        }
+      // 🔓 USER GESTURE → Audio allowed
+      const audioContext = new (window.AudioContext ||
+        window.webkitAudioContext)();
+      await audioContext.resume();
 
-        console.log("Token received");
+      console.log("Fetching token...");
+      const res = await fetch(TOKEN_URL);
+      const data = await res.json();
 
-        const device = new Device(data.token, {
-          codecPreferences: ["opus", "pcmu"],
-          enableRingingState: true,
-        });
-
-        device.on("ready", () => {
-          console.log("✅ Device Ready");
-          setStatus("Ready");
-        });
-
-        device.on("error", (error) => {
-          console.error("❌ Device error:", error);
-          setStatus("Error: " + error.message);
-        });
-
-        // 🔴 INBOUND CALL
-        device.on("incoming", (call) => {
-          console.log("📞 Incoming call from:", call.parameters.From);
-          setStatus("Incoming call");
-          callRef.current = call;
-
-          call.accept();
-
-          call.on("disconnect", () => {
-            console.log("📴 Call ended");
-            setStatus("Call ended");
-            callRef.current = null;
-          });
-        });
-
-        deviceRef.current = device;
-      } catch (err) {
-        console.error("Initialization failed:", err);
-        setStatus("Init failed");
+      if (!data.token) {
+        throw new Error("No token returned");
       }
-    };
 
-    initDevice();
+      const device = new Device(data.token, {
+        codecPreferences: ["opus", "pcmu"],
+        enableRingingState: true,
+      });
 
-    return () => {
-      if (deviceRef.current) {
-        deviceRef.current.destroy();
-      }
-    };
-  }, []);
+      device.on("ready", () => {
+        console.log("✅ Device Ready");
+        setStatus("Ready");
+      });
+
+      device.on("error", (error) => {
+        console.error("❌ Device error:", error);
+        setStatus("Error: " + error.message);
+      });
+
+      // 🔴 INBOUND CALL
+      device.on("incoming", (call) => {
+        console.log("📞 Incoming call from:", call.parameters.From);
+        setStatus("Incoming call");
+        callRef.current = call;
+
+        call.accept();
+
+        call.on("disconnect", () => {
+          setStatus("Call ended");
+          callRef.current = null;
+        });
+      });
+
+      deviceRef.current = device;
+    } catch (err) {
+      console.error("Init failed:", err);
+      setStatus("Init failed");
+    }
+  };
 
   return (
     <div style={{ padding: 20 }}>
       <h2>Agent Phone</h2>
+
+      <button onClick={startPhone} disabled={status === "Ready"}>
+        Start Phone
+      </button>
+
       <p>Status: {status}</p>
     </div>
   );
