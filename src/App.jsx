@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
 
-// Your Firebase Cloud Function URL to fetch Twilio token
 const TOKEN_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 
@@ -11,20 +10,15 @@ export default function InboundAgent() {
   const [status, setStatus] = useState("Click Start Phone to initialize");
   const [incoming, setIncoming] = useState(false);
 
-  // ✅ Start device on user gesture (fixes AudioContext issue)
   const startDevice = async () => {
     try {
       setStatus("Initializing...");
-
-      // 🔑 Resume AudioContext on user gesture
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
       await audioContext.resume();
 
-      // 1️⃣ Fetch Twilio token
       const res = await fetch(`${TOKEN_URL}?identity=agent`);
       const { token } = await res.json();
 
-      // 2️⃣ Create Device
       const device = new Device(token, { enableRingingState: true, closeProtection: true });
       deviceRef.current = device;
 
@@ -33,14 +27,11 @@ export default function InboundAgent() {
         setStatus("❌ Device error: " + err.message);
       });
 
-      // 🔴 3️⃣ Register device (mandatory for inbound calls)
       setStatus("Registering device...");
       await device.register();
       setStatus("✅ Device ready");
 
-      // 🔔 4️⃣ Handle incoming calls
       device.on("incoming", (call) => {
-        console.log("📞 Incoming call:", call.parameters.From);
         callRef.current = call;
         setIncoming(true);
         setStatus("📞 Incoming call...");
@@ -62,7 +53,6 @@ export default function InboundAgent() {
     }
   };
 
-  // Accept inbound call
   const acceptCall = () => {
     if (callRef.current) {
       callRef.current.accept();
@@ -71,7 +61,6 @@ export default function InboundAgent() {
     }
   };
 
-  // Reject inbound call
   const rejectCall = () => {
     if (callRef.current) {
       callRef.current.reject();
@@ -87,12 +76,10 @@ export default function InboundAgent() {
 
         <div style={styles.status}>{status}</div>
 
-        {/* Button to start device */}
         <button style={styles.startButton} onClick={startDevice}>
           Start Phone
         </button>
 
-        {/* Incoming call UI */}
         {incoming && (
           <div style={styles.incomingContainer}>
             <button style={styles.acceptButton} onClick={acceptCall}>
@@ -112,32 +99,36 @@ export default function InboundAgent() {
 const styles = {
   container: {
     height: "100vh",
+    width: "100vw",
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
     background: "#f0f2f5",
   },
   card: {
-    background: "#fff",
+    width: 350,
+    minHeight: 250,
     padding: 30,
     borderRadius: 12,
     boxShadow: "0 6px 20px rgba(0,0,0,0.15)",
-    textAlign: "center",
     display: "flex",
     flexDirection: "column",
-    alignItems: "center", // center all content horizontally
+    justifyContent: "center", // ⚡ Vertically center all content
+    alignItems: "center",     // ⚡ Horizontally center all content
+    background: "#fff",
+    textAlign: "center",
   },
   title: {
-    marginBottom: 20,
+    marginBottom: 15,
   },
   status: {
-    margin: "15px 0",
     padding: 10,
     borderRadius: 8,
     background: "#e0e0e0",
     fontWeight: "bold",
-    width: "100%",
     textAlign: "center",
+    width: "100%",
+    marginBottom: 15,
   },
   startButton: {
     background: "#1976d2",
@@ -152,9 +143,9 @@ const styles = {
   incomingContainer: {
     display: "flex",
     justifyContent: "center",
-    gap: "15px", // space between Accept and Reject buttons
-    marginTop: 15,
-    flexWrap: "wrap", // mobile-friendly: stack buttons if narrow
+    gap: "15px",
+    marginTop: 10,
+    flexWrap: "wrap",
   },
   acceptButton: {
     background: "#2e7d32",
