@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
 
 const TOKEN_URL =
-  "https://<your-cloud-fn>/getVoiceToken?identity=agent";
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken?identity=agent";
 
 export default function App() {
   const deviceRef = useRef(null);
