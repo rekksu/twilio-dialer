@@ -10,29 +10,62 @@ export default function App() {
   const [status, setStatus] = useState("Initializing...");
 
   useEffect(() => {
-    fetch(TOKEN_URL)
-      .then(res => res.json())
-      .then(data => {
-        const device = new Device(data.token);
+    const initDevice = async () => {
+      try {
+        console.log("Fetching token...");
+        const res = await fetch(TOKEN_URL);
+        const data = await res.json();
 
-        device.on("ready", () => setStatus("Ready"));
-        device.on("error", err => setStatus(err.message));
+        if (!data.token) {
+          throw new Error("No token returned");
+        }
+
+        console.log("Token received");
+
+        const device = new Device(data.token, {
+          codecPreferences: ["opus", "pcmu"],
+          enableRingingState: true,
+        });
+
+        device.on("ready", () => {
+          console.log("✅ Device Ready");
+          setStatus("Ready");
+        });
+
+        device.on("error", (error) => {
+          console.error("❌ Device error:", error);
+          setStatus("Error: " + error.message);
+        });
 
         // 🔴 INBOUND CALL
-        device.on("incoming", call => {
-          setStatus("Incoming call...");
+        device.on("incoming", (call) => {
+          console.log("📞 Incoming call from:", call.parameters.From);
+          setStatus("Incoming call");
           callRef.current = call;
 
           call.accept();
 
           call.on("disconnect", () => {
+            console.log("📴 Call ended");
             setStatus("Call ended");
             callRef.current = null;
           });
         });
 
         deviceRef.current = device;
-      });
+      } catch (err) {
+        console.error("Initialization failed:", err);
+        setStatus("Init failed");
+      }
+    };
+
+    initDevice();
+
+    return () => {
+      if (deviceRef.current) {
+        deviceRef.current.destroy();
+      }
+    };
   }, []);
 
   return (
