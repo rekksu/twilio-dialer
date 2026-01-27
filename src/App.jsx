@@ -11,14 +11,15 @@ export default function App() {
 
   const startPhone = async () => {
     try {
-      setStatus("Starting...");
+      console.log("🔵 Start clicked");
+      setStatus("Fetching token...");
 
-      // 🔓 USER GESTURE → Audio allowed
+      // 🔓 Required user gesture for audio
       const audioContext = new (window.AudioContext ||
         window.webkitAudioContext)();
       await audioContext.resume();
 
-      console.log("Fetching token...");
+      // 1️⃣ Fetch token
       const res = await fetch(TOKEN_URL);
       const data = await res.json();
 
@@ -26,11 +27,19 @@ export default function App() {
         throw new Error("No token returned");
       }
 
+      console.log("🔵 Token received");
+      setStatus("Initializing device...");
+
+      // 2️⃣ Create device
       const device = new Device(data.token, {
         codecPreferences: ["opus", "pcmu"],
         enableRingingState: true,
       });
 
+      // 3️⃣ Register device (🔥 REQUIRED IN SDK v2)
+      await device.register();
+
+      // 4️⃣ Events
       device.on("ready", () => {
         console.log("✅ Device Ready");
         setStatus("Ready");
@@ -41,7 +50,6 @@ export default function App() {
         setStatus("Error: " + error.message);
       });
 
-      // 🔴 INBOUND CALL
       device.on("incoming", (call) => {
         console.log("📞 Incoming call from:", call.parameters.From);
         setStatus("Incoming call");
@@ -50,6 +58,7 @@ export default function App() {
         call.accept();
 
         call.on("disconnect", () => {
+          console.log("📴 Call ended");
           setStatus("Call ended");
           callRef.current = null;
         });
@@ -57,8 +66,8 @@ export default function App() {
 
       deviceRef.current = device;
     } catch (err) {
-      console.error("Init failed:", err);
-      setStatus("Init failed");
+      console.error("❌ Start failed:", err);
+      setStatus("Failed: " + err.message);
     }
   };
 
