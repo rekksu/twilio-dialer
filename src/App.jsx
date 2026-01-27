@@ -1,77 +1,83 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
 
+// Your Firebase Cloud Function URL to fetch Twilio token
 const TOKEN_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 
-export default function App() {
+export default function InboundAgent() {
   const deviceRef = useRef(null);
   const callRef = useRef(null);
-
-  const [status, setStatus] = useState("Initializing...");
+  const [status, setStatus] = useState("Click Start Phone to initialize");
   const [incoming, setIncoming] = useState(false);
 
-  useEffect(() => {
-    const initDevice = async () => {
-      try {
-        setStatus("Fetching token...");
+  // ✅ Start device on user gesture (fixes AudioContext issue)
+  const startDevice = async () => {
+    try {
+      setStatus("Initializing...");
 
-        const res = await fetch(`${TOKEN_URL}?identity=agent`);
-        const { token } = await res.json();
+      // 🔑 MUST resume AudioContext on user gesture
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      await audioContext.resume();
 
-        const device = new Device(token, {
-          enableRingingState: true,
-          closeProtection: true,
+      // 1️⃣ Fetch Twilio token
+      const res = await fetch(`${TOKEN_URL}?identity=agent`);
+      const { token } = await res.json();
+
+      // 2️⃣ Create Device
+      const device = new Device(token, { enableRingingState: true, closeProtection: true });
+      deviceRef.current = device;
+
+      device.on("error", (err) => {
+        console.error("Device error:", err);
+        setStatus("❌ Device error: " + err.message);
+      });
+
+      // 🔴 3️⃣ Register device (mandatory for inbound calls)
+      setStatus("Registering device...");
+      await device.register();
+      setStatus("✅ Device ready");
+
+      // 🔔 4️⃣ Handle incoming calls
+      device.on("incoming", (call) => {
+        console.log("📞 Incoming call:", call.parameters.From);
+        callRef.current = call;
+        setIncoming(true);
+        setStatus("📞 Incoming call...");
+
+        call.on("disconnect", () => {
+          setIncoming(false);
+          setStatus("📴 Call ended");
         });
 
-        deviceRef.current = device;
-
-        device.on("error", (err) => {
-          console.error(err);
-          setStatus("❌ Device error");
+        call.on("error", (err) => {
+          setIncoming(false);
+          console.error("Call error:", err);
+          setStatus("❌ Call error");
         });
-
-        // 🔴 REQUIRED FOR INBOUND
-        await device.register();
-        setStatus("✅ Device ready (inbound)");
-
-        // 🔔 INBOUND CALL
-        device.on("incoming", (call) => {
-          console.log("Incoming call");
-          callRef.current = call;
-          setIncoming(true);
-          setStatus("📞 Incoming call");
-
-          call.on("disconnect", () => {
-            setIncoming(false);
-            setStatus("📴 Call ended");
-          });
-
-          call.on("error", () => {
-            setIncoming(false);
-            setStatus("❌ Call error");
-          });
-        });
-
-      } catch (err) {
-        console.error(err);
-        setStatus("❌ Init failed");
-      }
-    };
-
-    initDevice();
-  }, []);
-
-  const acceptCall = () => {
-    callRef.current?.accept();
-    setIncoming(false);
-    setStatus("✅ Connected");
+      });
+    } catch (err) {
+      console.error(err);
+      setStatus("❌ Failed to initialize device");
+    }
   };
 
+  // Accept inbound call
+  const acceptCall = () => {
+    if (callRef.current) {
+      callRef.current.accept();
+      setIncoming(false);
+      setStatus("✅ Call connected");
+    }
+  };
+
+  // Reject inbound call
   const rejectCall = () => {
-    callRef.current?.reject();
-    setIncoming(false);
-    setStatus("❌ Rejected");
+    if (callRef.current) {
+      callRef.current.reject();
+      setIncoming(false);
+      setStatus("❌ Call rejected");
+    }
   };
 
   return (
@@ -81,12 +87,18 @@ export default function App() {
 
         <div style={styles.status}>{status}</div>
 
+        {/* Button to start device */}
+        <button style={styles.startButton} onClick={startDevice}>
+          Start Phone
+        </button>
+
+        {/* Incoming call UI */}
         {incoming && (
           <div>
-            <button style={styles.accept} onClick={acceptCall}>
+            <button style={styles.acceptButton} onClick={acceptCall}>
               Accept
             </button>
-            <button style={styles.reject} onClick={rejectCall}>
+            <button style={styles.rejectButton} onClick={rejectCall}>
               Reject
             </button>
           </div>
@@ -96,12 +108,13 @@ export default function App() {
   );
 }
 
+// ---- Styles ----
 const styles = {
   container: {
     height: "100vh",
     display: "flex",
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
     background: "#f0f2f5",
   },
   card: {
@@ -118,7 +131,17 @@ const styles = {
     background: "#e0e0e0",
     fontWeight: "bold",
   },
-  accept: {
+  startButton: {
+    background: "#1976d2",
+    color: "#fff",
+    padding: "10px 20px",
+    border: "none",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontWeight: "bold",
+    marginBottom: 10,
+  },
+  acceptButton: {
     background: "#2e7d32",
     color: "#fff",
     padding: "10px 20px",
@@ -127,7 +150,7 @@ const styles = {
     borderRadius: 8,
     cursor: "pointer",
   },
-  reject: {
+  rejectButton: {
     background: "#d32f2f",
     color: "#fff",
     padding: "10px 20px",
