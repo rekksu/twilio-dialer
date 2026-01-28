@@ -20,27 +20,29 @@ export default function AutoOutboundDialer() {
   const startedAtRef = useRef(null);
 
   // Save call log to backend
- const saveCallLog = async (statusStr, reason, start, end) => {
-    if (savedRef.current) return;
-    savedRef.current = true;
-
-    await fetch(CALL_LOG_FUNCTION_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        to: phoneNumber,
-        status: statusStr,
-        reason,
-        direction: "outbound", // ✅ GUARANTEED
-        customerId,
-        orgId,
-        startedAt: start ? new Date(start).toISOString() : null,
-        endedAt: end ? new Date(end).toISOString() : null,
-        durationSeconds:
-          start && end ? Math.floor((end - start) / 1000) : 0,
-      }),
-    });
+  const saveCallLog = async (statusStr, reason, toNumber, duration, start, end) => {
+    try {
+      await fetch(CALL_LOG_FUNCTION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: toNumber, // ✅ FIXED
+          status: statusStr,
+          reason,
+          customerId,
+          orgId,
+          direction: "outbound", // ✅ explicit
+          startedAt: start ? new Date(start).toISOString() : null,
+          endedAt: end ? new Date(end).toISOString() : null,
+          durationSeconds: duration,
+        }),
+      });
+    } catch (err) {
+      console.error("Save call failed:", err);
+    }
   };
+
+
   // Format phone number
   const formatPhoneNumber = (num) => {
     let cleaned = num.replace(/[\s\-\(\)]/g, "");
@@ -122,19 +124,43 @@ export default function AutoOutboundDialer() {
         call.on("disconnect", () => {
           stopLiveTimer();
           const end = Date.now();
-          const dur = startedAtRef.current ? Math.floor((end - startedAtRef.current) / 1000) : 0;
-          saveCallLog("ended", null, dur, startedAtRef.current, end);
+          const dur = startedAtRef.current
+            ? Math.floor((end - startedAtRef.current) / 1000)
+            : 0;
+
+          saveCallLog(
+            "ended",
+            null,
+            call.parameters.To, // ✅ FIX
+            dur,
+            startedAtRef.current,
+            end
+          );
+
           setIsHangupEnabled(false);
           setStatus("📴 Call ended");
         });
+
         call.on("error", (err) => {
           stopLiveTimer();
           const end = Date.now();
-          const dur = startedAtRef.current ? Math.floor((end - startedAtRef.current) / 1000) : 0;
-          saveCallLog("failed", err.message, dur, startedAtRef.current, end);
+          const dur = startedAtRef.current
+            ? Math.floor((end - startedAtRef.current) / 1000)
+            : 0;
+
+          saveCallLog(
+            "failed",
+            err.message,
+            call.parameters.To, // ✅ FIX
+            dur,
+            startedAtRef.current,
+            end
+          );
+
           setIsHangupEnabled(false);
           setStatus("❌ Call failed");
         });
+
       }
     };
 
@@ -175,8 +201,8 @@ export default function AutoOutboundDialer() {
       status.includes("❌")
         ? "#ffe5e5"
         : status.includes("✅")
-        ? "#e5ffe5"
-        : "#e0e0e0",
+          ? "#e5ffe5"
+          : "#e0e0e0",
     color:
       status.includes("❌") ? "#d32f2f" : status.includes("✅") ? "#2e7d32" : "#000",
   };
