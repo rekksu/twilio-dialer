@@ -26,21 +26,22 @@ export default function AutoOutboundDialer() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          to: toNumber, // ✅ FIXED
+          to: toNumber, // ✅ REQUIRED
           status: statusStr,
           reason,
           customerId,
           orgId,
-          direction: "outbound", // ✅ explicit
+          direction: "outbound",
           startedAt: start ? new Date(start).toISOString() : null,
           endedAt: end ? new Date(end).toISOString() : null,
           durationSeconds: duration,
         }),
       });
     } catch (err) {
-      console.error("Save call failed:", err);
+      console.error("Save failed:", err);
     }
   };
+
 
 
   // Format phone number
@@ -131,7 +132,7 @@ export default function AutoOutboundDialer() {
           saveCallLog(
             "ended",
             null,
-            call.parameters.To, // ✅ FIX
+            call.parameters.To, // ✅ THIS FIXES 400
             dur,
             startedAtRef.current,
             end
@@ -140,6 +141,7 @@ export default function AutoOutboundDialer() {
           setIsHangupEnabled(false);
           setStatus("📴 Call ended");
         });
+
 
         call.on("error", (err) => {
           stopLiveTimer();
@@ -151,7 +153,7 @@ export default function AutoOutboundDialer() {
           saveCallLog(
             "failed",
             err.message,
-            call.parameters.To, // ✅ FIX
+            call.parameters.To, // ✅ REQUIRED
             dur,
             startedAtRef.current,
             end
