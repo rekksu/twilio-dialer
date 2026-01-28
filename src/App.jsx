@@ -6,7 +6,7 @@ const CLOUD_FUNCTION_URL =
 const CALL_LOG_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/createCallLog";
 
-export default function App() {
+export default function AutoOutboundDialer() {
   const [status, setStatus] = useState("Initializing...");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [customerId, setCustomerId] = useState(null);
@@ -19,7 +19,7 @@ export default function App() {
   const timerRef = useRef(null);
   const startedAtRef = useRef(null);
 
-  // --- Save call log ---
+  // Save call log to backend
   const saveCallLog = async (statusStr, reason, duration, start, end) => {
     await fetch(CALL_LOG_FUNCTION_URL, {
       method: "POST",
@@ -37,12 +37,14 @@ export default function App() {
     });
   };
 
+  // Format phone number
   const formatPhoneNumber = (num) => {
     let cleaned = num.replace(/[\s\-\(\)]/g, "");
     if (!cleaned.startsWith("+")) cleaned = "+" + cleaned;
     return cleaned;
   };
 
+  // Request microphone
   const checkMic = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -66,113 +68,94 @@ export default function App() {
     timerRef.current = null;
   };
 
-  // --- Initialize Twilio Device automatically ---
-  const initDevice = async () => {
-    const micOk = await checkMic();
-    if (!micOk) return;
-
-    setStatus("Fetching token...");
-    const tokenRes = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
-    const { token } = await tokenRes.json();
-
-    const device = new Device(token, { enableRingingState: true });
-    deviceRef.current = device;
-
-    // Attach default <audio> for incoming audio (for future inbound calls)
-    const audioEl = new Audio();
-    audioEl.autoplay = true;
-    device.audio.incoming(audioEl);
-
-    device.on("error", (err) => {
-      console.error(err);
-      setStatus("❌ Device error: " + err.message);
-    });
-
-    setStatus("✅ Device ready");
-  };
-
-  // --- Start outbound call ---
-  const startCall = async () => {
-    if (!phoneNumber) return;
-
-    const device = deviceRef.current;
-    if (!device) {
-      setStatus("❌ Device not ready");
-      return;
-    }
-
-    setStatus("Dialing...");
-    const call = await device.connect({
-      params: { To: formatPhoneNumber(phoneNumber) },
-    });
-    callRef.current = call;
-    setIsHangupEnabled(true);
-
-    call.on("ringing", () => setStatus("📞 Ringing..."));
-    call.on("accept", () => {
-      startedAtRef.current = Date.now();
-      startLiveTimer();
-      setStatus("✅ Connected!");
-    });
-    call.on("disconnect", () => {
-      stopLiveTimer();
-      const end = Date.now();
-      const dur = startedAtRef.current
-        ? Math.floor((end - startedAtRef.current) / 1000)
-        : 0;
-      saveCallLog("ended", null, dur, startedAtRef.current, end);
-      setIsHangupEnabled(false);
-      setStatus("📴 Call ended");
-    });
-    call.on("error", (err) => {
-      stopLiveTimer();
-      const end = Date.now();
-      const dur = startedAtRef.current
-        ? Math.floor((end - startedAtRef.current) / 1000)
-        : 0;
-      saveCallLog("failed", err.message, dur, startedAtRef.current, end);
-      setIsHangupEnabled(false);
-      setStatus("❌ Call failed");
-    });
-  };
-
   const hangup = () => {
     if (callRef.current) callRef.current.disconnect();
     setIsHangupEnabled(false);
   };
 
-  // --- Auto initialize device on mount ---
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
-    setPhoneNumber(urlParams.get("to") || "");
+    const toNumber = urlParams.get("to") || "";
+    setPhoneNumber(toNumber);
     setCustomerId(urlParams.get("customerId"));
     setOrgId(urlParams.get("orgId"));
-    initDevice();
 
-    // Ensure HTML/body take full height
+    const initDeviceAndCall = async () => {
+      const micOk = await checkMic();
+      if (!micOk) return;
+
+      setStatus("Fetching token...");
+      const tokenRes = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
+      const { token } = await tokenRes.json();
+
+      const device = new Device(token, { enableRingingState: true });
+      deviceRef.current = device;
+
+      // Attach Audio element for ringing & call audio
+      const audioEl = new Audio();
+      audioEl.autoplay = true;
+      device.audio.incoming(audioEl);
+
+      device.on("error", (err) => {
+        console.error(err);
+        setStatus("❌ Device error: " + err.message);
+      });
+
+      setStatus("✅ Device ready");
+
+      if (toNumber) {
+        setStatus("Dialing...");
+        const call = await device.connect({ params: { To: formatPhoneNumber(toNumber) } });
+        callRef.current = call;
+        setIsHangupEnabled(true);
+
+        call.on("ringing", () => setStatus("📞 Ringing..."));
+        call.on("accept", () => {
+          startedAtRef.current = Date.now();
+          startLiveTimer();
+          setStatus("✅ Connected!");
+        });
+        call.on("disconnect", () => {
+          stopLiveTimer();
+          const end = Date.now();
+          const dur = startedAtRef.current ? Math.floor((end - startedAtRef.current) / 1000) : 0;
+          saveCallLog("ended", null, dur, startedAtRef.current, end);
+          setIsHangupEnabled(false);
+          setStatus("📴 Call ended");
+        });
+        call.on("error", (err) => {
+          stopLiveTimer();
+          const end = Date.now();
+          const dur = startedAtRef.current ? Math.floor((end - startedAtRef.current) / 1000) : 0;
+          saveCallLog("failed", err.message, dur, startedAtRef.current, end);
+          setIsHangupEnabled(false);
+          setStatus("❌ Call failed");
+        });
+      }
+    };
+
+    initDeviceAndCall();
+
+    // Full page height
     document.documentElement.style.height = "100%";
     document.body.style.height = "100%";
     document.body.style.margin = "0";
   }, []);
 
-  // --- Styles ---
+  // --- STYLES ---
   const containerStyle = {
-    position: "fixed",
-    top: 0,
-    left: 0,
-    width: "100vw",
     height: "100vh",
+    width: "100vw",
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
     background: "#f0f2f5",
-    zIndex: 9999,
   };
 
   const cardStyle = {
-    width: "400px",
-    padding: "30px",
-    borderRadius: "12px",
+    width: 400,
+    padding: 30,
+    borderRadius: 12,
     boxShadow: "0 6px 20px rgba(0,0,0,0.15)",
     background: "#fff",
     textAlign: "center",
@@ -180,8 +163,8 @@ export default function App() {
   };
 
   const statusStyle = {
-    padding: "12px",
-    borderRadius: "8px",
+    padding: 12,
+    borderRadius: 8,
     margin: "15px 0",
     fontWeight: "bold",
     background:
@@ -197,18 +180,12 @@ export default function App() {
   const buttonStyle = {
     padding: "12px 25px",
     margin: "8px",
-    borderRadius: "8px",
+    borderRadius: 8,
     border: "none",
     cursor: "pointer",
     fontWeight: "bold",
-    fontSize: "16px",
+    fontSize: 16,
     transition: "all 0.2s",
-  };
-
-  const startButtonStyle = {
-    ...buttonStyle,
-    background: "#1976d2",
-    color: "#fff",
   };
 
   const hangupButtonStyle = {
@@ -218,12 +195,12 @@ export default function App() {
   };
 
   const inputStyle = {
-    padding: "12px",
+    padding: 12,
     width: "90%",
-    borderRadius: "8px",
+    borderRadius: 8,
     border: "1px solid #ccc",
-    fontSize: "16px",
-    marginBottom: "15px",
+    fontSize: 16,
+    marginBottom: 15,
     backgroundColor: "#f0f0f0",
     color: "#555",
   };
@@ -235,28 +212,17 @@ export default function App() {
 
         <div style={statusStyle}>{status}</div>
 
-        <label style={{ fontWeight: "bold", display: "block", marginBottom: "8px" }}>
+        <label style={{ fontWeight: "bold", display: "block", marginBottom: 8 }}>
           Phone Number:
         </label>
         <input type="text" value={phoneNumber} readOnly style={inputStyle} />
 
         {isHangupEnabled && (
-          <p style={{ fontWeight: "bold" }}>⏱ Duration: {Math.floor(callDuration)}s</p>
+          <p style={{ fontWeight: "bold" }}>⏱ Duration: {callDuration}s</p>
         )}
 
         <div>
-          <button
-            style={startButtonStyle}
-            onClick={startCall}
-            disabled={!phoneNumber || isHangupEnabled}
-          >
-            Start Call
-          </button>
-          <button
-            style={hangupButtonStyle}
-            onClick={hangup}
-            disabled={!isHangupEnabled}
-          >
+          <button style={hangupButtonStyle} onClick={hangup} disabled={!isHangupEnabled}>
             Hang Up
           </button>
         </div>
