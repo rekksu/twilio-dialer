@@ -19,6 +19,7 @@ export default function App() {
   const timerRef = useRef(null);
   const startedAtRef = useRef(null);
 
+  // --- Save call log ---
   const saveCallLog = async (statusStr, reason, duration, start, end) => {
     await fetch(CALL_LOG_FUNCTION_URL, {
       method: "POST",
@@ -65,73 +66,70 @@ export default function App() {
     timerRef.current = null;
   };
 
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    setPhoneNumber(urlParams.get("to") || "");
-    setCustomerId(urlParams.get("customerId"));
-    setOrgId(urlParams.get("orgId"));
-    setStatus("Ready to call");
-
-    // Ensure HTML/body take full height
-    document.documentElement.style.height = "100%";
-    document.body.style.height = "100%";
-    document.body.style.margin = "0";
-  }, []);
-
-  const startCall = async () => {
-    if (!phoneNumber) return;
-
+  // --- Initialize Twilio Device automatically ---
+  const initDevice = async () => {
     const micOk = await checkMic();
     if (!micOk) return;
 
     setStatus("Fetching token...");
-
     const tokenRes = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
     const { token } = await tokenRes.json();
 
     const device = new Device(token, { enableRingingState: true });
     deviceRef.current = device;
 
+    // Attach default <audio> for incoming audio (for future inbound calls)
+    const audioEl = new Audio();
+    audioEl.autoplay = true;
+    device.audio.incoming(audioEl);
+
     device.on("error", (err) => {
       console.error(err);
-      setStatus("❌ Device error");
+      setStatus("❌ Device error: " + err.message);
     });
+
+    setStatus("✅ Device ready");
+  };
+
+  // --- Start outbound call ---
+  const startCall = async () => {
+    if (!phoneNumber) return;
+
+    const device = deviceRef.current;
+    if (!device) {
+      setStatus("❌ Device not ready");
+      return;
+    }
 
     setStatus("Dialing...");
     const call = await device.connect({
       params: { To: formatPhoneNumber(phoneNumber) },
     });
-
     callRef.current = call;
     setIsHangupEnabled(true);
 
     call.on("ringing", () => setStatus("📞 Ringing..."));
-
     call.on("accept", () => {
       startedAtRef.current = Date.now();
       startLiveTimer();
       setStatus("✅ Connected!");
     });
-
     call.on("disconnect", () => {
       stopLiveTimer();
       const end = Date.now();
       const dur = startedAtRef.current
         ? Math.floor((end - startedAtRef.current) / 1000)
         : 0;
-
       saveCallLog("ended", null, dur, startedAtRef.current, end);
       setIsHangupEnabled(false);
       setStatus("📴 Call ended");
     });
-
     call.on("error", (err) => {
       stopLiveTimer();
       const end = Date.now();
       const dur = startedAtRef.current
         ? Math.floor((end - startedAtRef.current) / 1000)
         : 0;
-
       saveCallLog("failed", err.message, dur, startedAtRef.current, end);
       setIsHangupEnabled(false);
       setStatus("❌ Call failed");
@@ -143,7 +141,21 @@ export default function App() {
     setIsHangupEnabled(false);
   };
 
-  // --- STYLES ---
+  // --- Auto initialize device on mount ---
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    setPhoneNumber(urlParams.get("to") || "");
+    setCustomerId(urlParams.get("customerId"));
+    setOrgId(urlParams.get("orgId"));
+    initDevice();
+
+    // Ensure HTML/body take full height
+    document.documentElement.style.height = "100%";
+    document.body.style.height = "100%";
+    document.body.style.margin = "0";
+  }, []);
+
+  // --- Styles ---
   const containerStyle = {
     position: "fixed",
     top: 0,
