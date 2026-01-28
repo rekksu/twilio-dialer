@@ -42,14 +42,12 @@ export default function App() {
     }
   };
 
-  // Format phone number
   const formatPhoneNumber = (num) => {
     let cleaned = num.replace(/[\s\-\(\)]/g, "");
     if (!cleaned.startsWith("+")) cleaned = "+" + cleaned;
     return cleaned;
   };
 
-  // Request microphone
   const checkMic = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -78,77 +76,77 @@ export default function App() {
     setIsHangupEnabled(false);
   };
 
+  // Auto-call on page load
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const toNumber = urlParams.get("to") || "";
     setPhoneNumber(toNumber);
     setCustomerId(urlParams.get("customerId"));
     setOrgId(urlParams.get("orgId"));
-    setStatus("Ready to call");
+    setStatus("Initializing auto-call...");
 
-    // Ensure HTML/body take full height
     document.documentElement.style.height = "100%";
     document.body.style.height = "100%";
     document.body.style.margin = "0";
+
+    if (!toNumber) {
+      setStatus("❌ No phone number provided in URL");
+      return;
+    }
+
+    const initAndCall = async () => {
+      const micOk = await checkMic();
+      if (!micOk) return;
+
+      setStatus("Fetching token...");
+      const tokenRes = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
+      const { token } = await tokenRes.json();
+
+      const device = new Device(token, { enableRingingState: true });
+      deviceRef.current = device;
+
+      const audioEl = new Audio();
+      audioEl.autoplay = true;
+      device.audio.incoming(audioEl);
+
+      device.on("error", (err) => {
+        console.error(err);
+        setStatus("❌ Device error: " + err.message);
+      });
+
+      setStatus("✅ Device ready");
+      setIsHangupEnabled(true);
+
+      // Start the outbound call automatically
+      const call = await device.connect({ params: { To: formatPhoneNumber(toNumber) } });
+      callRef.current = call;
+
+      call.on("ringing", () => setStatus("📞 Ringing..."));
+      call.on("accept", () => {
+        startedAtRef.current = Date.now();
+        startLiveTimer();
+        setStatus("✅ Connected!");
+      });
+      call.on("disconnect", () => {
+        stopLiveTimer();
+        const end = Date.now();
+        const dur = startedAtRef.current ? Math.floor((end - startedAtRef.current) / 1000) : 0;
+        saveCallLog("ended", null, dur, startedAtRef.current, end, toNumber);
+        setIsHangupEnabled(false);
+        setStatus("📴 Call ended");
+      });
+      call.on("error", (err) => {
+        stopLiveTimer();
+        const end = Date.now();
+        const dur = startedAtRef.current ? Math.floor((end - startedAtRef.current) / 1000) : 0;
+        saveCallLog("failed", err.message, dur, startedAtRef.current, end, toNumber);
+        setIsHangupEnabled(false);
+        setStatus("❌ Call failed");
+      });
+    };
+
+    initAndCall();
   }, []);
-
-  const startCall = async () => {
-    if (!phoneNumber) return;
-
-    const micOk = await checkMic();
-    if (!micOk) return;
-
-    setStatus("Fetching token...");
-
-    const tokenRes = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
-    const { token } = await tokenRes.json();
-
-    const device = new Device(token, { enableRingingState: true });
-    deviceRef.current = device;
-
-    // Attach audio element for ringing & call audio
-    const audioEl = new Audio();
-    audioEl.autoplay = true;
-    device.audio.incoming(audioEl);
-
-    device.on("error", (err) => {
-      console.error(err);
-      setStatus("❌ Device error: " + err.message);
-    });
-
-    setStatus("✅ Device ready");
-    setIsHangupEnabled(true);
-
-    const call = await device.connect({ params: { To: formatPhoneNumber(phoneNumber) } });
-    callRef.current = call;
-
-    call.on("ringing", () => setStatus("📞 Ringing..."));
-
-    call.on("accept", () => {
-      startedAtRef.current = Date.now();
-      startLiveTimer();
-      setStatus("✅ Connected!");
-    });
-
-    call.on("disconnect", () => {
-      stopLiveTimer();
-      const end = Date.now();
-      const dur = startedAtRef.current ? Math.floor((end - startedAtRef.current) / 1000) : 0;
-      // Use phoneNumber explicitly for saving
-      saveCallLog("ended", null, dur, startedAtRef.current, end, phoneNumber);
-      setIsHangupEnabled(false);
-      setStatus("📴 Call ended");
-    });
-
-    call.on("error", (err) => {
-      stopLiveTimer();
-      const end = Date.now();
-      const dur = startedAtRef.current ? Math.floor((end - startedAtRef.current) / 1000) : 0;
-      saveCallLog("failed", err.message, dur, startedAtRef.current, end, phoneNumber);
-      setIsHangupEnabled(false);
-      setStatus("❌ Call failed");
-    });
-  };
 
   // --- STYLES ---
   const containerStyle = {
@@ -200,12 +198,6 @@ export default function App() {
     transition: "all 0.2s",
   };
 
-  const startButtonStyle = {
-    ...buttonStyle,
-    background: "#1976d2",
-    color: "#fff",
-  };
-
   const hangupButtonStyle = {
     ...buttonStyle,
     background: "#d32f2f",
@@ -238,9 +230,6 @@ export default function App() {
         {isHangupEnabled && <p style={{ fontWeight: "bold" }}>⏱ Duration: {Math.floor(callDuration)}s</p>}
 
         <div>
-          <button style={startButtonStyle} onClick={startCall} disabled={!phoneNumber || isHangupEnabled}>
-            Start Call
-          </button>
           <button style={hangupButtonStyle} onClick={hangup} disabled={!isHangupEnabled}>
             Hang Up
           </button>
