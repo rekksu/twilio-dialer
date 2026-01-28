@@ -20,18 +20,17 @@ export default function AutoOutboundDialer() {
   const startedAtRef = useRef(null);
 
   // Save call log to backend
-  const saveCallLog = async (statusStr, reason, toNumber, duration, start, end) => {
+  const saveCallLog = async (statusStr, reason, duration, start, end) => {
     try {
       await fetch(CALL_LOG_FUNCTION_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          to: toNumber, // ✅ REQUIRED
-          status: statusStr,
+          to: phoneNumber, // ✅ GUARANTEED VALUE
+          status: statusStr, // ✅ REQUIRED
           reason,
           customerId,
           orgId,
-          direction: "outbound",
           startedAt: start ? new Date(start).toISOString() : null,
           endedAt: end ? new Date(end).toISOString() : null,
           durationSeconds: duration,
@@ -41,6 +40,7 @@ export default function AutoOutboundDialer() {
       console.error("Save failed:", err);
     }
   };
+
 
 
 
@@ -129,18 +129,12 @@ export default function AutoOutboundDialer() {
             ? Math.floor((end - startedAtRef.current) / 1000)
             : 0;
 
-          saveCallLog(
-            "ended",
-            null,
-            call.parameters.To, // ✅ THIS FIXES 400
-            dur,
-            startedAtRef.current,
-            end
-          );
+          saveCallLog("ended", null, dur, startedAtRef.current, end);
 
           setIsHangupEnabled(false);
           setStatus("📴 Call ended");
         });
+
 
 
         call.on("error", (err) => {
@@ -150,18 +144,12 @@ export default function AutoOutboundDialer() {
             ? Math.floor((end - startedAtRef.current) / 1000)
             : 0;
 
-          saveCallLog(
-            "failed",
-            err.message,
-            call.parameters.To, // ✅ REQUIRED
-            dur,
-            startedAtRef.current,
-            end
-          );
+          saveCallLog("failed", err.message, dur, startedAtRef.current, end);
 
           setIsHangupEnabled(false);
           setStatus("❌ Call failed");
         });
+
 
       }
     };
