@@ -17,7 +17,7 @@ export default function App() {
   const timerRef = useRef(null);
   const startedAtRef = useRef(null);
 
-  // ✅ IMPORTANT: refs (not state)
+  // ✅ refs (critical for saving)
   const customerIdRef = useRef(null);
   const orgIdRef = useRef(null);
   const hasSavedRef = useRef(false);
@@ -50,7 +50,9 @@ export default function App() {
 
   const startTimer = () => {
     timerRef.current = setInterval(() => {
-      setCallDuration(Math.floor((Date.now() - startedAtRef.current) / 1000));
+      setCallDuration(
+        Math.floor((Date.now() - startedAtRef.current) / 1000)
+      );
     }, 1000);
   };
 
@@ -73,11 +75,15 @@ export default function App() {
     }
 
     const initCall = async () => {
+      setStatus("Fetching token...");
+
       const tokenRes = await fetch(`${CLOUD_FUNCTION_URL}?identity=agent`);
       const { token } = await tokenRes.json();
 
       const device = new Device(token, { enableRingingState: true });
       deviceRef.current = device;
+
+      setStatus("Dialing...");
 
       const call = await device.connect({
         params: { To: formatPhoneNumber(to) },
@@ -85,12 +91,13 @@ export default function App() {
 
       callRef.current = call;
       setIsHangupEnabled(true);
-      setStatus("📞 Ringing...");
+
+      call.on("ringing", () => setStatus("📞 Ringing..."));
 
       call.on("accept", () => {
         startedAtRef.current = Date.now();
         startTimer();
-        setStatus("✅ Connected");
+        setStatus("✅ Connected!");
       });
 
       call.on("disconnect", () => {
@@ -101,8 +108,8 @@ export default function App() {
           : 0;
 
         saveCallLog("ended", null, dur, startedAtRef.current, end, to);
-        setStatus("📴 Call ended");
         setIsHangupEnabled(false);
+        setStatus("📴 Call ended");
       });
 
       call.on("error", (err) => {
@@ -113,49 +120,107 @@ export default function App() {
           : 0;
 
         saveCallLog("failed", err.message, dur, startedAtRef.current, end, to);
-        setStatus("❌ Call failed");
         setIsHangupEnabled(false);
+        setStatus("❌ Call failed");
       });
     };
 
     initCall();
+
+    document.documentElement.style.height = "100%";
+    document.body.style.height = "100%";
+    document.body.style.margin = "0";
   }, []);
 
   const hangup = () => {
     callRef.current?.disconnect();
+    setIsHangupEnabled(false);
+  };
+
+  // ---------- UI STYLES (RESTORED) ----------
+  const containerStyle = {
+    height: "100vh",
+    width: "100vw",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    background: "#f0f2f5",
+  };
+
+  const cardStyle = {
+    width: 400,
+    padding: 30,
+    borderRadius: 12,
+    boxShadow: "0 6px 20px rgba(0,0,0,0.15)",
+    background: "#fff",
+    textAlign: "center",
+    fontFamily: "Segoe UI, sans-serif",
+  };
+
+  const statusStyle = {
+    padding: 12,
+    borderRadius: 8,
+    margin: "15px 0",
+    fontWeight: "bold",
+    background:
+      status.includes("❌")
+        ? "#ffe5e5"
+        : status.includes("✅")
+        ? "#e5ffe5"
+        : "#e0e0e0",
+    color:
+      status.includes("❌")
+        ? "#d32f2f"
+        : status.includes("✅")
+        ? "#2e7d32"
+        : "#000",
+  };
+
+  const inputStyle = {
+    padding: 12,
+    width: "90%",
+    borderRadius: 8,
+    border: "1px solid #ccc",
+    fontSize: 16,
+    marginBottom: 15,
+    backgroundColor: "#f0f0f0",
+    color: "#555",
+  };
+
+  const hangupButtonStyle = {
+    padding: "12px 25px",
+    borderRadius: 8,
+    border: "none",
+    cursor: "pointer",
+    fontWeight: "bold",
+    fontSize: 16,
+    background: "#d32f2f",
+    color: "#fff",
   };
 
   return (
-    <div style={{
-      height: "100vh",
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      background: "#f0f2f5"
-    }}>
-      <div style={{
-        width: 400,
-        padding: 30,
-        borderRadius: 12,
-        background: "#fff",
-        textAlign: "center",
-        boxShadow: "0 6px 20px rgba(0,0,0,.15)"
-      }}>
+    <div style={containerStyle}>
+      <div style={cardStyle}>
         <h2>📞 CRM Orbit Dialer</h2>
-        <p><strong>Status:</strong> {status}</p>
-        <p><strong>To:</strong> {phoneNumber}</p>
-        {isHangupEnabled && <p>⏱ {callDuration}s</p>}
+
+        <div style={statusStyle}>{status}</div>
+
+        <label style={{ fontWeight: "bold", display: "block", marginBottom: 8 }}>
+          Phone Number:
+        </label>
+
+        <input type="text" value={phoneNumber} readOnly style={inputStyle} />
+
+        {isHangupEnabled && (
+          <p style={{ fontWeight: "bold" }}>
+            ⏱ Duration: {callDuration}s
+          </p>
+        )}
+
         <button
+          style={hangupButtonStyle}
           onClick={hangup}
           disabled={!isHangupEnabled}
-          style={{
-            padding: "12px 25px",
-            background: "#d32f2f",
-            color: "#fff",
-            border: "none",
-            borderRadius: 8,
-            cursor: "pointer"
-          }}
         >
           Hang Up
         </button>
