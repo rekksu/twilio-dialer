@@ -11,16 +11,23 @@ export default function App() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [isHangupEnabled, setIsHangupEnabled] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
+  const [micMuted, setMicMuted] = useState(false);
 
   const deviceRef = useRef(null);
   const callRef = useRef(null);
   const timerRef = useRef(null);
   const startedAtRef = useRef(null);
 
-  // ✅ refs (critical for saving)
+  // ✅ refs
   const customerIdRef = useRef(null);
   const orgIdRef = useRef(null);
   const hasSavedRef = useRef(false);
+
+  const formatPhoneNumber = (num) => {
+    let cleaned = num.replace(/[\s\-\(\)]/g, "");
+    if (!cleaned.startsWith("+")) cleaned = "+" + cleaned;
+    return cleaned;
+  };
 
   const saveCallLog = async (statusStr, reason, duration, start, end, to) => {
     if (!to || !statusStr || hasSavedRef.current) return;
@@ -30,7 +37,7 @@ export default function App() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        to,
+        to: formatPhoneNumber(to), // ✅ ALWAYS WITH +
         status: statusStr,
         reason,
         customerId: customerIdRef.current,
@@ -40,12 +47,6 @@ export default function App() {
         durationSeconds: duration,
       }),
     });
-  };
-
-  const formatPhoneNumber = (num) => {
-    let cleaned = num.replace(/[\s\-\(\)]/g, "");
-    if (!cleaned.startsWith("+")) cleaned = "+" + cleaned;
-    return cleaned;
   };
 
   const startTimer = () => {
@@ -109,6 +110,7 @@ export default function App() {
 
         saveCallLog("ended", null, dur, startedAtRef.current, end, to);
         setIsHangupEnabled(false);
+        setMicMuted(false);
         setStatus("📴 Call ended");
       });
 
@@ -121,15 +123,12 @@ export default function App() {
 
         saveCallLog("failed", err.message, dur, startedAtRef.current, end, to);
         setIsHangupEnabled(false);
+        setMicMuted(false);
         setStatus("❌ Call failed");
       });
     };
 
     initCall();
-
-    document.documentElement.style.height = "100%";
-    document.body.style.height = "100%";
-    document.body.style.margin = "0";
   }, []);
 
   const hangup = () => {
@@ -137,7 +136,14 @@ export default function App() {
     setIsHangupEnabled(false);
   };
 
-  // ---------- UI STYLES (RESTORED) ----------
+  const toggleMic = () => {
+    if (!callRef.current) return;
+    const next = !micMuted;
+    callRef.current.mute(next);
+    setMicMuted(next);
+  };
+
+  /* ---------- UI STYLES ---------- */
   const containerStyle = {
     height: "100vh",
     width: "100vw",
@@ -168,12 +174,6 @@ export default function App() {
         : status.includes("✅")
         ? "#e5ffe5"
         : "#e0e0e0",
-    color:
-      status.includes("❌")
-        ? "#d32f2f"
-        : status.includes("✅")
-        ? "#2e7d32"
-        : "#000",
   };
 
   const inputStyle = {
@@ -198,6 +198,22 @@ export default function App() {
     color: "#fff",
   };
 
+  const micOnStyle = {
+    padding: "12px 20px",
+    borderRadius: 8,
+    border: "none",
+    fontWeight: "bold",
+    background: "#2e7d32",
+    color: "#fff",
+    cursor: "pointer",
+    marginRight: 10,
+  };
+
+  const micOffStyle = {
+    ...micOnStyle,
+    background: "#d32f2f",
+  };
+
   return (
     <div style={containerStyle}>
       <div style={cardStyle}>
@@ -205,7 +221,7 @@ export default function App() {
 
         <div style={statusStyle}>{status}</div>
 
-        <label style={{ fontWeight: "bold", display: "block", marginBottom: 8 }}>
+        <label style={{ fontWeight: "bold", marginBottom: 8, display: "block" }}>
           Phone Number:
         </label>
 
@@ -215,6 +231,15 @@ export default function App() {
           <p style={{ fontWeight: "bold" }}>
             ⏱ Duration: {callDuration}s
           </p>
+        )}
+
+        {isHangupEnabled && (
+          <button
+            style={micMuted ? micOffStyle : micOnStyle}
+            onClick={toggleMic}
+          >
+            {micMuted ? "Mic Off" : "Mic On"}
+          </button>
         )}
 
         <button
