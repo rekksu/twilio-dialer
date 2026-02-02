@@ -1,85 +1,33 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Device } from "@twilio/voice-sdk";
 
-/* ================= CONFIG ================= */
-
 const CLOUD_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
-
 const CALL_LOG_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/createCallLog";
-
 const VERIFY_ACCESS_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
 
-/* ================= APP ================= */
-
 export default function App() {
-  /* ---------- SECURITY ---------- */
-  const [checkingAccess, setCheckingAccess] = useState(true);
-  const [allowed, setAllowed] = useState(false);
-
-  /* ---------- EXISTING STATES ---------- */
   const [status, setStatus] = useState("Initializing...");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [isHangupEnabled, setIsHangupEnabled] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
   const [micMuted, setMicMuted] = useState(false);
 
+  // 🔐 auth states
+  const [authorized, setAuthorized] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+
   const deviceRef = useRef(null);
   const callRef = useRef(null);
   const timerRef = useRef(null);
   const startedAtRef = useRef(null);
 
-  // refs
+  // ✅ refs
   const customerIdRef = useRef(null);
   const orgIdRef = useRef(null);
   const hasSavedRef = useRef(false);
-
-  /* ================= STEP 1: VERIFY ACCESS ================= */
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const accessKey = params.get("accessKey");
-
-    if (!accessKey) {
-      setAllowed(false);
-      setCheckingAccess(false);
-      return;
-    }
-
-    fetch(VERIFY_ACCESS_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: accessKey }),
-    })
-      .then((res) => {
-        setAllowed(res.ok);
-        setCheckingAccess(false);
-      })
-      .catch(() => {
-        setAllowed(false);
-        setCheckingAccess(false);
-      });
-  }, []);
-
-  /* ---------- BLOCK PAGE ---------- */
-  if (checkingAccess) {
-    return (
-      <div style={{ textAlign: "center", marginTop: 50 }}>
-        🔒 Verifying access...
-      </div>
-    );
-  }
-
-  if (!allowed) {
-    return (
-      <div style={{ textAlign: "center", marginTop: 50 }}>
-        ❌ Access denied
-      </div>
-    );
-  }
-
-  /* ================= EXISTING LOGIC ================= */
 
   const formatPhoneNumber = (num) => {
     let cleaned = num.replace(/[\s\-\(\)]/g, "");
@@ -119,14 +67,61 @@ export default function App() {
     if (timerRef.current) clearInterval(timerRef.current);
   };
 
-  /* ================= CALL INIT ================= */
+  /* =========================
+     🔐 VERIFY ACCESS FIRST
+     ========================= */
   useEffect(() => {
+    const verifyAccess = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const accessKey = params.get("accessKey");
+
+      const to = params.get("to");
+      customerIdRef.current = params.get("customerId");
+
+      setPhoneNumber(to || "");
+
+      if (!accessKey) {
+        setStatus("🚫 Unauthorized access");
+        setAuthChecked(true);
+        return;
+      }
+
+      try {
+        const res = await fetch(VERIFY_ACCESS_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: accessKey }),
+        });
+
+        if (!res.ok) {
+          setStatus("🚫 Access denied");
+          setAuthChecked(true);
+          return;
+        }
+
+        const data = await res.json();
+        orgIdRef.current = data.orgId;
+
+        setAuthorized(true);
+        setAuthChecked(true);
+      } catch (err) {
+        console.error(err);
+        setStatus("🚫 Verification failed");
+        setAuthChecked(true);
+      }
+    };
+
+    verifyAccess();
+  }, []);
+
+  /* =========================
+     📞 INIT CALL (ONLY IF AUTH)
+     ========================= */
+  useEffect(() => {
+    if (!authChecked || !authorized) return;
+
     const params = new URLSearchParams(window.location.search);
-
     const to = params.get("to");
-    customerIdRef.current = params.get("customerId");
-
-    setPhoneNumber(to || "");
 
     if (!to) {
       setStatus("❌ Missing phone number");
@@ -187,9 +182,7 @@ export default function App() {
     };
 
     initCall();
-  }, []);
-
-  /* ================= UI ACTIONS ================= */
+  }, [authChecked, authorized]);
 
   const hangup = () => {
     callRef.current?.disconnect();
@@ -203,8 +196,7 @@ export default function App() {
     setMicMuted(next);
   };
 
-  /* ================= STYLES ================= */
-
+  /* ---------- UI STYLES (UNCHANGED) ---------- */
   const containerStyle = {
     height: "100vh",
     width: "100vw",
@@ -230,7 +222,7 @@ export default function App() {
     margin: "15px 0",
     fontWeight: "bold",
     background:
-      status.includes("❌")
+      status.includes("❌") || status.includes("🚫")
         ? "#ffe5e5"
         : status.includes("✅")
         ? "#e5ffe5"
@@ -275,8 +267,7 @@ export default function App() {
     background: "#d32f2f",
   };
 
-  /* ================= RENDER ================= */
-
+  /* ---------- UI (UNCHANGED) ---------- */
   return (
     <div style={containerStyle}>
       <div style={cardStyle}>
