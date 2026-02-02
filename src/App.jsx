@@ -1,12 +1,25 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Device } from "@twilio/voice-sdk";
 
+/* ================= CONFIG ================= */
+
 const CLOUD_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
+
 const CALL_LOG_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/createCallLog";
 
+const VERIFY_ACCESS_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
+
+/* ================= APP ================= */
+
 export default function App() {
+  /* ---------- SECURITY ---------- */
+  const [checkingAccess, setCheckingAccess] = useState(true);
+  const [allowed, setAllowed] = useState(false);
+
+  /* ---------- EXISTING STATES ---------- */
   const [status, setStatus] = useState("Initializing...");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [isHangupEnabled, setIsHangupEnabled] = useState(false);
@@ -18,10 +31,55 @@ export default function App() {
   const timerRef = useRef(null);
   const startedAtRef = useRef(null);
 
-  // ✅ refs
+  // refs
   const customerIdRef = useRef(null);
   const orgIdRef = useRef(null);
   const hasSavedRef = useRef(false);
+
+  /* ================= STEP 1: VERIFY ACCESS ================= */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const accessKey = params.get("accessKey");
+
+    if (!accessKey) {
+      setAllowed(false);
+      setCheckingAccess(false);
+      return;
+    }
+
+    fetch(VERIFY_ACCESS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: accessKey }),
+    })
+      .then((res) => {
+        setAllowed(res.ok);
+        setCheckingAccess(false);
+      })
+      .catch(() => {
+        setAllowed(false);
+        setCheckingAccess(false);
+      });
+  }, []);
+
+  /* ---------- BLOCK PAGE ---------- */
+  if (checkingAccess) {
+    return (
+      <div style={{ textAlign: "center", marginTop: 50 }}>
+        🔒 Verifying access...
+      </div>
+    );
+  }
+
+  if (!allowed) {
+    return (
+      <div style={{ textAlign: "center", marginTop: 50 }}>
+        ❌ Access denied
+      </div>
+    );
+  }
+
+  /* ================= EXISTING LOGIC ================= */
 
   const formatPhoneNumber = (num) => {
     let cleaned = num.replace(/[\s\-\(\)]/g, "");
@@ -37,7 +95,7 @@ export default function App() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        to: formatPhoneNumber(to), // ✅ ALWAYS WITH +
+        to: formatPhoneNumber(to),
         status: statusStr,
         reason,
         customerId: customerIdRef.current,
@@ -61,12 +119,12 @@ export default function App() {
     if (timerRef.current) clearInterval(timerRef.current);
   };
 
+  /* ================= CALL INIT ================= */
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
 
     const to = params.get("to");
     customerIdRef.current = params.get("customerId");
-    orgIdRef.current = params.get("orgId");
 
     setPhoneNumber(to || "");
 
@@ -131,6 +189,8 @@ export default function App() {
     initCall();
   }, []);
 
+  /* ================= UI ACTIONS ================= */
+
   const hangup = () => {
     callRef.current?.disconnect();
     setIsHangupEnabled(false);
@@ -143,7 +203,8 @@ export default function App() {
     setMicMuted(next);
   };
 
-  /* ---------- UI STYLES ---------- */
+  /* ================= STYLES ================= */
+
   const containerStyle = {
     height: "100vh",
     width: "100vw",
@@ -213,6 +274,8 @@ export default function App() {
     ...micOnStyle,
     background: "#d32f2f",
   };
+
+  /* ================= RENDER ================= */
 
   return (
     <div style={containerStyle}>
