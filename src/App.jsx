@@ -38,7 +38,7 @@ export default function DevPhone() {
 
   const callDirectionRef = useRef("outbound");
   const customerIdRef = useRef(null);
-  const answeredRef = useRef(false); // track if inbound call was answered
+  const answeredRef = useRef(false); // track if call was answered
 
   /* ================= VERIFY ACCESS & GET URL NUMBER ================= */
   useEffect(() => {
@@ -109,8 +109,21 @@ export default function DevPhone() {
       setIncoming(true);
       setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
 
-      call.on("disconnect", cleanup);
-      call.on("error", cleanup);
+      call.on("accept", () => {
+        onConnected();
+        setStatus("✅ Call answered");
+      });
+
+      call.on("disconnect", () => {
+        if (!answeredRef.current) setStatus("❌ Rejected / No Answer");
+        cleanup();
+      });
+
+      call.on("error", (err) => {
+        console.error(err);
+        if (!answeredRef.current) setStatus("❌ Call failed");
+        cleanup();
+      });
     });
 
     await device.register();
@@ -123,6 +136,7 @@ export default function DevPhone() {
 
     savedRef.current = false;
     callDirectionRef.current = "outbound";
+    answeredRef.current = false;
     setStatus("📞 Dialing…");
 
     const formattedNumber = formatOutboundNumber(number);
@@ -130,15 +144,27 @@ export default function DevPhone() {
     const call = await deviceRef.current.connect({ params: { To: formattedNumber } });
     callRef.current = call;
 
-    call.on("accept", onConnected);
-    call.on("disconnect", cleanup);
-    call.on("error", cleanup);
+    call.on("accept", () => {
+      onConnected();
+      setStatus("✅ Call answered");
+    });
+
+    call.on("disconnect", () => {
+      if (!answeredRef.current) setStatus("❌ No answer / Rejected");
+      cleanup();
+    });
+
+    call.on("error", (err) => {
+      console.error(err);
+      if (!answeredRef.current) setStatus("❌ Call failed / Rejected");
+      cleanup();
+    });
   };
 
   /* ================= CALL HANDLERS ================= */
   const onConnected = () => {
     startedAtRef.current = Date.now();
-    answeredRef.current = true; // mark as answered if inbound
+    answeredRef.current = true;
     setIncoming(false);
     setInCall(true);
     setStatus("✅ Connected");
@@ -150,7 +176,11 @@ export default function DevPhone() {
     setIncoming(false);
     setInCall(false);
     setMicMuted(false);
-    setStatus("✅ Ready");
+    if (!answeredRef.current && callDirectionRef.current === "outbound") {
+      setStatus("❌ Call ended without answer");
+    } else {
+      setStatus("✅ Ready");
+    }
   };
 
   /* ================= TIMER ================= */
@@ -173,11 +203,15 @@ export default function DevPhone() {
 
     let callStatus = "ended";
 
-    // inbound special cases
     if (callDirectionRef.current === "inbound") {
       if (!answeredRef.current && !inCall && !incoming) callStatus = "rejected";
       if (!answeredRef.current && !inCall && incoming === false) callStatus = "no_answer";
       if (answeredRef.current) callStatus = "answered";
+    } else {
+      // outbound
+      if (!answeredRef.current) callStatus = "no_answer";
+      if (answeredRef.current && !inCall) callStatus = "ended";
+      if (answeredRef.current && inCall) callStatus = "answered";
     }
 
     const data = {
@@ -198,7 +232,6 @@ export default function DevPhone() {
       const fromNumber = callRef.current?.parameters?.From || number;
       data.to = fromNumber;
       data.from = fromNumber;
-      // no customerId for inbound
     }
 
     try {
