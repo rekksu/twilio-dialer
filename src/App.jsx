@@ -12,7 +12,7 @@ const CALL_LOG_URL =
 /* ================= HELPER ================= */
 const formatOutboundNumber = (num) => {
   if (!num) return "";
-  let cleaned = num.replace(/[^\d]/g, "");
+  let cleaned = num.replace(/[^\d]/g, ""); // remove anything except digits
   if (!cleaned.startsWith("+")) cleaned = "+" + cleaned;
   return cleaned;
 };
@@ -38,9 +38,7 @@ export default function DevPhone() {
 
   const callDirectionRef = useRef("outbound");
   const customerIdRef = useRef(null);
-  const answeredRef = useRef(false); // inbound answered
-  const outboundAnsweredRef = useRef(false); // remote party picked up
-  const outboundHungUpRef = useRef(false); // agent hung up before answer
+  const answeredRef = useRef(false); // track if inbound call was answered
 
   /* ================= VERIFY ACCESS & GET URL NUMBER ================= */
   useEffect(() => {
@@ -125,8 +123,6 @@ export default function DevPhone() {
 
     savedRef.current = false;
     callDirectionRef.current = "outbound";
-    outboundAnsweredRef.current = false;
-    outboundHungUpRef.current = false;
     setStatus("📞 Dialing…");
 
     const formattedNumber = formatOutboundNumber(number);
@@ -134,28 +130,15 @@ export default function DevPhone() {
     const call = await deviceRef.current.connect({ params: { To: formattedNumber } });
     callRef.current = call;
 
-    // remote party picked up
-    call.on("accept", () => {
-      outboundAnsweredRef.current = true;
-      onConnected();
-    });
-
-    // call ended/disconnected
-    call.on("disconnect", () => {
-      if (!outboundAnsweredRef.current && !outboundHungUpRef.current) {
-        // Twilio ended without answer
-        outboundHungUpRef.current = false;
-      }
-      cleanup();
-    });
-
+    call.on("accept", onConnected);
+    call.on("disconnect", cleanup);
     call.on("error", cleanup);
   };
 
   /* ================= CALL HANDLERS ================= */
   const onConnected = () => {
     startedAtRef.current = Date.now();
-    answeredRef.current = true; // mark inbound as answered
+    answeredRef.current = true; // mark as answered if inbound
     setIncoming(false);
     setInCall(true);
     setStatus("✅ Connected");
@@ -190,15 +173,11 @@ export default function DevPhone() {
 
     let callStatus = "ended";
 
+    // inbound special cases
     if (callDirectionRef.current === "inbound") {
       if (!answeredRef.current && !inCall && !incoming) callStatus = "rejected";
       if (!answeredRef.current && !inCall && incoming === false) callStatus = "no_answer";
       if (answeredRef.current) callStatus = "answered";
-    } else {
-      // OUTBOUND: track local hangup vs remote answer
-      if (outboundAnsweredRef.current) callStatus = "answered";
-      else if (outboundHungUpRef.current) callStatus = "rejected"; // agent hung up
-      else callStatus = "no_answer"; // remote didn't pick up
     }
 
     const data = {
@@ -219,6 +198,7 @@ export default function DevPhone() {
       const fromNumber = callRef.current?.parameters?.From || number;
       data.to = fromNumber;
       data.from = fromNumber;
+      // no customerId for inbound
     }
 
     try {
@@ -236,12 +216,7 @@ export default function DevPhone() {
   /* ================= ACTIONS ================= */
   const accept = () => { callRef.current?.accept(); onConnected(); };
   const reject = () => { callRef.current?.reject(); answeredRef.current = false; cleanup(); };
-  const hangup = () => { 
-    if (callDirectionRef.current === "outbound" && !outboundAnsweredRef.current) {
-      outboundHungUpRef.current = true; // mark as rejected
-    }
-    callRef.current?.disconnect(); 
-  };
+  const hangup = () => callRef.current?.disconnect();
   const toggleMic = () => { const next = !micMuted; callRef.current?.mute(next); setMicMuted(next); };
 
   const press = (v) => setNumber((n) => n + v);
