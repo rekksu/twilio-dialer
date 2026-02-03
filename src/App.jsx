@@ -28,8 +28,8 @@ export default function DevPhone() {
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
 
-  // Call direction: "inbound" or "outbound"
   const callDirectionRef = useRef("outbound");
+  const customerIdRef = useRef(null);
 
   /* ================= VERIFY ACCESS & GET URL NUMBER ================= */
   useEffect(() => {
@@ -37,8 +37,10 @@ export default function DevPhone() {
       const params = new URLSearchParams(window.location.search);
       const accessKey = params.get("accessKey");
       const toNumber = params.get("to");
+      const customerId = params.get("customerId");
 
-      if (toNumber) setNumber(toNumber); // pre-fill input
+      if (toNumber) setNumber(toNumber);
+      if (customerId) customerIdRef.current = customerId;
 
       if (!accessKey) {
         setStatus("🚫 Unauthorized");
@@ -90,13 +92,12 @@ export default function DevPhone() {
     deviceRef.current = device;
     device.audio.incoming(audioRef.current);
 
-    // Incoming call listener
     device.on("incoming", (call) => {
       callRef.current = call;
       savedRef.current = false;
       callDirectionRef.current = "inbound";
       setIncoming(true);
-      setStatus("📞 Incoming call");
+      setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
 
       call.on("disconnect", cleanup);
       call.on("error", cleanup);
@@ -166,13 +167,15 @@ export default function DevPhone() {
       direction: callDirectionRef.current,
     };
 
-    // Set correct to/from
+    if (customerIdRef.current) data.customerId = customerIdRef.current;
+
     if (callDirectionRef.current === "outbound") {
       data.to = number;
-      data.from = "agent"; // you can replace with agent identifier
+      data.from = "agent";
     } else {
-      data.to = "agent";
-      data.from = callRef.current?.parameters?.From || number;
+      const fromNumber = callRef.current?.parameters?.From || number;
+      data.to = fromNumber;    // inbound: to = caller number
+      data.from = fromNumber;  // inbound: from = caller number
     }
 
     try {
