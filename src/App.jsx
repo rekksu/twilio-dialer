@@ -116,7 +116,7 @@ export default function DevPhone() {
     setStatus("📞 Dialing…");
 
     // ensure + prefix
-    const formattedNumber = number.startsWith("+") ? number : "+" + number;
+    const formattedNumber = number.startsWith("+") ? number : "+" +number;
 
     const call = await deviceRef.current.connect({ params: { To: formattedNumber } });
     callRef.current = call;
