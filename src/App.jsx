@@ -115,7 +115,10 @@ export default function DevPhone() {
     callDirectionRef.current = "outbound";
     setStatus("📞 Dialing…");
 
-    const call = await deviceRef.current.connect({ params: { To: number } });
+    // ensure + prefix
+    const formattedNumber = number.startsWith("+") ? number : "+" + number;
+
+    const call = await deviceRef.current.connect({ params: { To: formattedNumber } });
     callRef.current = call;
 
     call.on("accept", onConnected);
@@ -167,11 +170,11 @@ export default function DevPhone() {
       direction: callDirectionRef.current,
     };
 
-    if (customerIdRef.current) data.customerId = customerIdRef.current;
-
     if (callDirectionRef.current === "outbound") {
-      data.to = number;
+      const formattedNumber = number.startsWith("+") ? number : "+" + number;
+      data.to = formattedNumber;
       data.from = "agent";
+      if (customerIdRef.current) data.customerId = customerIdRef.current; // only outbound
     } else {
       const fromNumber = callRef.current?.parameters?.From || number;
       data.to = fromNumber;    // inbound: to = caller number
