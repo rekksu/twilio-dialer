@@ -12,7 +12,7 @@ const CALL_LOG_URL =
 /* ================= HELPER ================= */
 const formatOutboundNumber = (num) => {
   if (!num) return "";
-  let cleaned = num.replace(/[^\d+]/g, ""); // remove anything except digits and +
+  let cleaned = num.replace(/[^\d]/g, ""); // remove anything except digits
   if (!cleaned.startsWith("+")) cleaned = "+" + cleaned;
   return cleaned;
 };
@@ -109,8 +109,8 @@ export default function DevPhone() {
       setIncoming(true);
       setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
 
-      call.on("disconnect", () => cleanup());
-      call.on("error", () => cleanup());
+      call.on("disconnect", cleanup);
+      call.on("error", cleanup);
     });
 
     await device.register();
@@ -175,8 +175,8 @@ export default function DevPhone() {
 
     // inbound special cases
     if (callDirectionRef.current === "inbound") {
-      if (!answeredRef.current && !inCall) callStatus = "no_answer"; // never accepted
-      if (!answeredRef.current && inCall === false && incoming === false) callStatus = "rejected"; // rejected
+      if (!answeredRef.current && !inCall && !incoming) callStatus = "rejected";
+      if (!answeredRef.current && !inCall && incoming === false) callStatus = "no_answer";
       if (answeredRef.current) callStatus = "answered";
     }
 
@@ -196,7 +196,7 @@ export default function DevPhone() {
       if (customerIdRef.current) data.customerId = customerIdRef.current;
     } else {
       const fromNumber = callRef.current?.parameters?.From || number;
-      data.to = fromNumber;    
+      data.to = fromNumber;
       data.from = fromNumber;
       // no customerId for inbound
     }
@@ -241,7 +241,6 @@ export default function DevPhone() {
         <h2>📞 Dev Phone</h2>
         <div style={ui.status}>{status}</div>
 
-        {/* Outbound dial */}
         {!inCall && !incoming && (
           <>
             <input style={ui.input} value={number} readOnly />
@@ -250,7 +249,6 @@ export default function DevPhone() {
           </>
         )}
 
-        {/* Incoming call */}
         {incoming && (
           <div style={ui.row}>
             <button style={ui.accept} onClick={accept}>Accept</button>
@@ -258,7 +256,6 @@ export default function DevPhone() {
           </div>
         )}
 
-        {/* Active call */}
         {inCall && (
           <>
             <p>⏱ {duration}s</p>
@@ -287,17 +284,14 @@ function DialPad({ onPress, onBack }) {
 }
 
 const Screen = ({ text }) => (
-  <div style={ui.page}>
-    <div style={ui.phone}>{text}</div>
-  </div>
+  <div style={{...ui.page, textAlign:"center"}}><div style={ui.phone}>{text}</div></div>
 );
 
-
-/* ================= STYLES ================= */
 /* ================= STYLES ================= */
 const ui = {
   page: {
     height: "100vh",
+    width: "100vw",
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
@@ -313,77 +307,18 @@ const ui = {
     textAlign: "center",
     display: "flex",
     flexDirection: "column",
-    alignItems: "center", // center inner content
+    alignItems: "center",
     gap: 12,
   },
   status: { margin: "10px 0", fontWeight: "bold" },
-  input: {
-    width: "auto", // make input auto width
-    minWidth: 200,
-    fontSize: 22,
-    padding: 10,
-    textAlign: "center",
-    marginBottom: 10,
-    borderRadius: 10,
-    border: "1px solid #ccc",
-  },
-  pad: {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, 60px)",
-    gap: 10,
-    justifyContent: "center", // center grid
-    marginBottom: 10,
-  },
-  key: {
-    padding: 16,
-    fontSize: 18,
-    borderRadius: 12,
-    border: "1px solid #ccc",
-    cursor: "pointer",
-  },
-  call: {
-    background: "#2e7d32",
-    color: "#fff",
-    padding: 14,
-    borderRadius: 12,
-    border: "none",
-    fontWeight: "bold",
-    minWidth: 120,
-    cursor: "pointer",
-  },
-  accept: {
-    background: "#2e7d32",
-    color: "#fff",
-    padding: 12,
-    borderRadius: 10,
-    border: "none",
-    minWidth: 100,
-    cursor: "pointer",
-  },
-  reject: {
-    background: "#d32f2f",
-    color: "#fff",
-    padding: 12,
-    borderRadius: 10,
-    border: "none",
-    minWidth: 100,
-    cursor: "pointer",
-  },
-  row: {
-    display: "flex",
-    gap: 12,
-    justifyContent: "center", // center the buttons
-    width: "100%",
-  },
-  modal: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,.5)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10,
-  },
+  input: { width: "auto", minWidth: 200, fontSize: 22, padding: 10, textAlign: "center", marginBottom: 10, borderRadius: 10, border: "1px solid #ccc" },
+  pad: { display: "grid", gridTemplateColumns: "repeat(3, 60px)", gap: 10, justifyContent: "center", marginBottom: 10 },
+  key: { padding: 16, fontSize: 18, borderRadius: 12, border: "1px solid #ccc", cursor: "pointer" },
+  call: { background: "#2e7d32", color: "#fff", padding: 14, borderRadius: 12, border: "none", fontWeight: "bold", minWidth: 120, cursor: "pointer" },
+  accept: { background: "#2e7d32", color: "#fff", padding: 12, borderRadius: 10, border: "none", minWidth: 100, cursor: "pointer" },
+  reject: { background: "#d32f2f", color: "#fff", padding: 12, borderRadius: 10, border: "none", minWidth: 100, cursor: "pointer" },
+  row: { display: "flex", gap: 12, justifyContent: "center", width: "100%" },
+  modal: { position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 },
   modalCard: { background: "#fff", padding: 30, borderRadius: 14, textAlign: "center" },
   primary: { padding: "10px 20px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" },
 };
