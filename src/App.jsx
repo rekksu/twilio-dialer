@@ -238,7 +238,7 @@ export default function DevPhone() {
       )}
 
       <div style={ui.phone}>
-        <h2>📞 Dev Phone</h2>
+        <h2>📞 Orbit Virtual Phone</h2>
         <div style={ui.status}>{status}</div>
 
         {!inCall && !incoming && (
