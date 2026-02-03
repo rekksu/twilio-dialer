@@ -243,7 +243,19 @@ export default function DevPhone() {
 
         {!inCall && !incoming && (
           <>
-            <input style={ui.input} value={number} readOnly />
+            <input
+              style={ui.input}
+              value={number}
+              onChange={(e) => {
+                let val = e.target.value;
+                // Ensure it always starts with +
+                if (!val.startsWith("+")) val = "+" + val.replace(/\+/g, "");
+                // Allow only digits after +
+                val = "+" + val.slice(1).replace(/[^\d]/g, "");
+                setNumber(val);
+              }}
+              onFocus={(e) => e.target.select()} // optional: auto-select all when clicked
+            />
             <DialPad onPress={press} onBack={backspace} />
             <button style={ui.call} onClick={dial}>Call</button>
           </>
@@ -274,7 +286,7 @@ export default function DevPhone() {
 
 /* ================= DIAL PAD ================= */
 function DialPad({ onPress, onBack }) {
-  const keys = ["1","2","3","4","5","6","7","8","9","*","0","#"];
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"];
   return (
     <div style={ui.pad}>
       {keys.map((k) => <button key={k} style={ui.key} onClick={() => onPress(k)}>{k}</button>)}
@@ -284,7 +296,7 @@ function DialPad({ onPress, onBack }) {
 }
 
 const Screen = ({ text }) => (
-  <div style={{...ui.page, textAlign:"center"}}><div style={ui.phone}>{text}</div></div>
+  <div style={{ ...ui.page, textAlign: "center" }}><div style={ui.phone}>{text}</div></div>
 );
 
 /* ================= STYLES ================= */
