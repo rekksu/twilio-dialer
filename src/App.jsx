@@ -38,6 +38,7 @@ export default function DevPhone() {
 
   const callDirectionRef = useRef("outbound");
   const customerIdRef = useRef(null);
+  const answeredRef = useRef(false); // track if inbound call was answered
 
   /* ================= VERIFY ACCESS & GET URL NUMBER ================= */
   useEffect(() => {
@@ -103,12 +104,13 @@ export default function DevPhone() {
     device.on("incoming", (call) => {
       callRef.current = call;
       savedRef.current = false;
+      answeredRef.current = false;
       callDirectionRef.current = "inbound";
       setIncoming(true);
       setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
 
-      call.on("disconnect", cleanup);
-      call.on("error", cleanup);
+      call.on("disconnect", () => cleanup());
+      call.on("error", () => cleanup());
     });
 
     await device.register();
@@ -136,6 +138,7 @@ export default function DevPhone() {
   /* ================= CALL HANDLERS ================= */
   const onConnected = () => {
     startedAtRef.current = Date.now();
+    answeredRef.current = true; // mark as answered if inbound
     setIncoming(false);
     setInCall(true);
     setStatus("✅ Connected");
@@ -168,9 +171,18 @@ export default function DevPhone() {
     const endedAt = new Date().toISOString();
     const dur = startedAtRef.current ? Math.floor((Date.now() - startedAtRef.current) / 1000) : 0;
 
+    let callStatus = "ended";
+
+    // inbound special cases
+    if (callDirectionRef.current === "inbound") {
+      if (!answeredRef.current && !inCall) callStatus = "no_answer"; // never accepted
+      if (!answeredRef.current && inCall === false && incoming === false) callStatus = "rejected"; // rejected
+      if (answeredRef.current) callStatus = "answered";
+    }
+
     const data = {
       orgId: orgIdRef.current,
-      status: "ended",
+      status: callStatus,
       startedAt,
       endedAt,
       durationSeconds: dur,
@@ -203,7 +215,7 @@ export default function DevPhone() {
 
   /* ================= ACTIONS ================= */
   const accept = () => { callRef.current?.accept(); onConnected(); };
-  const reject = () => { callRef.current?.reject(); cleanup(); };
+  const reject = () => { callRef.current?.reject(); answeredRef.current = false; cleanup(); };
   const hangup = () => callRef.current?.disconnect();
   const toggleMic = () => { const next = !micMuted; callRef.current?.mute(next); setMicMuted(next); };
 
