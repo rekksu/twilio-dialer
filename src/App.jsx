@@ -38,9 +38,7 @@ export default function DevPhone() {
 
   const callDirectionRef = useRef("outbound");
   const customerIdRef = useRef(null);
-  const answeredRef = useRef(false); // inbound answered
-  const outboundAnsweredRef = useRef(false); // outbound answered
-  const outboundRejectedRef = useRef(false); // outbound manually hung up before answer
+  const answeredRef = useRef(false); // track if inbound call was answered
 
   /* ================= VERIFY ACCESS & GET URL NUMBER ================= */
   useEffect(() => {
@@ -125,8 +123,6 @@ export default function DevPhone() {
 
     savedRef.current = false;
     callDirectionRef.current = "outbound";
-    outboundAnsweredRef.current = false;
-    outboundRejectedRef.current = false;
     setStatus("📞 Dialing…");
 
     const formattedNumber = formatOutboundNumber(number);
@@ -134,23 +130,15 @@ export default function DevPhone() {
     const call = await deviceRef.current.connect({ params: { To: formattedNumber } });
     callRef.current = call;
 
-    call.on("accept", () => {
-      outboundAnsweredRef.current = true;
-      onConnected();
-    });
-
-    call.on("disconnect", () => {
-      if (!outboundAnsweredRef.current) outboundRejectedRef.current = true;
-      cleanup();
-    });
-
+    call.on("accept", onConnected);
+    call.on("disconnect", cleanup);
     call.on("error", cleanup);
   };
 
   /* ================= CALL HANDLERS ================= */
   const onConnected = () => {
     startedAtRef.current = Date.now();
-    answeredRef.current = true; // mark inbound as answered
+    answeredRef.current = true; // mark as answered if inbound
     setIncoming(false);
     setInCall(true);
     setStatus("✅ Connected");
@@ -185,15 +173,11 @@ export default function DevPhone() {
 
     let callStatus = "ended";
 
+    // inbound special cases
     if (callDirectionRef.current === "inbound") {
       if (!answeredRef.current && !inCall && !incoming) callStatus = "rejected";
       if (!answeredRef.current && !inCall && incoming === false) callStatus = "no_answer";
       if (answeredRef.current) callStatus = "answered";
-    } else {
-      // OUTBOUND: set status based on answered/rejected/no_answer
-      if (outboundAnsweredRef.current) callStatus = "answered";
-      else if (outboundRejectedRef.current) callStatus = "rejected";
-      else callStatus = "no_answer";
     }
 
     const data = {
@@ -214,6 +198,7 @@ export default function DevPhone() {
       const fromNumber = callRef.current?.parameters?.From || number;
       data.to = fromNumber;
       data.from = fromNumber;
+      // no customerId for inbound
     }
 
     try {
