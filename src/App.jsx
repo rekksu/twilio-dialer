@@ -292,19 +292,58 @@ const Screen = ({ text }) => (
   </div>
 );
 
+
 /* ================= STYLES ================= */
 const ui = {
-  page: { height: "100vh", display: "flex", justifyContent: "center", alignItems: "center", background: "#eef1f5" },
-  phone: { width: 360, background: "#fff", padding: 24, borderRadius: 18, boxShadow: "0 12px 32px rgba(0,0,0,.2)", textAlign: "center" },
+  page: {
+    height: "100vh",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    background: "#eef1f5",
+  },
+  phone: {
+    width: 360,
+    maxWidth: "90%",
+    background: "#fff",
+    padding: 24,
+    borderRadius: 18,
+    boxShadow: "0 12px 32px rgba(0,0,0,.2)",
+    textAlign: "center",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+  },
   status: { margin: "10px 0", fontWeight: "bold" },
-  input: { width: "100%", fontSize: 22, padding: 10, textAlign: "center", marginBottom: 10 },
-  pad: { display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 10 },
+  input: {
+    width: "100%",
+    fontSize: 22,
+    padding: 10,
+    textAlign: "center",
+    marginBottom: 10,
+    borderRadius: 10,
+    border: "1px solid #ccc",
+  },
+  pad: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3,1fr)",
+    gap: 10,
+    marginBottom: 10,
+  },
   key: { padding: 16, fontSize: 18, borderRadius: 12, border: "1px solid #ccc", cursor: "pointer" },
   call: { background: "#2e7d32", color: "#fff", padding: 14, borderRadius: 12, border: "none", fontWeight: "bold", width: "100%" },
   accept: { background: "#2e7d32", color: "#fff", padding: 12, borderRadius: 10, border: "none", flex: 1 },
   reject: { background: "#d32f2f", color: "#fff", padding: 12, borderRadius: 10, border: "none", flex: 1 },
-  row: { display: "flex", gap: 10 },
-  modal: { position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center" },
-  modalCard: { background: "#fff", padding: 30, borderRadius: 14 },
-  primary: { padding: "10px 20px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 8 },
+  row: { display: "flex", gap: 10, width: "100%", justifyContent: "center" },
+  modal: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,.5)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
+  },
+  modalCard: { background: "#fff", padding: 30, borderRadius: 14, textAlign: "center" },
+  primary: { padding: "10px 20px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" },
 };
