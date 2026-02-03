@@ -28,6 +28,9 @@ export default function DevPhone() {
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
 
+  // Call direction: "inbound" or "outbound"
+  const callDirectionRef = useRef("outbound");
+
   /* ================= VERIFY ACCESS & GET URL NUMBER ================= */
   useEffect(() => {
     const run = async () => {
@@ -91,6 +94,7 @@ export default function DevPhone() {
     device.on("incoming", (call) => {
       callRef.current = call;
       savedRef.current = false;
+      callDirectionRef.current = "inbound";
       setIncoming(true);
       setStatus("📞 Incoming call");
 
@@ -107,6 +111,7 @@ export default function DevPhone() {
     if (!deviceRef.current || !number) return;
 
     savedRef.current = false;
+    callDirectionRef.current = "outbound";
     setStatus("📞 Dialing…");
 
     const call = await deviceRef.current.connect({ params: { To: number } });
@@ -148,16 +153,27 @@ export default function DevPhone() {
     if (savedRef.current) return;
     savedRef.current = true;
 
-    const end = Date.now();
-    const dur = startedAtRef.current ? Math.floor((end - startedAtRef.current) / 1000) : 0;
+    const startedAt = startedAtRef.current ? new Date(startedAtRef.current).toISOString() : null;
+    const endedAt = new Date().toISOString();
+    const dur = startedAtRef.current ? Math.floor((Date.now() - startedAtRef.current) / 1000) : 0;
 
     const data = {
       orgId: orgIdRef.current,
       status: "ended",
+      startedAt,
+      endedAt,
       durationSeconds: dur,
-      to: callRef.current?.parameters?.To || number || null,
-      from: callRef.current?.parameters?.From || number || null,
+      direction: callDirectionRef.current,
     };
+
+    // Set correct to/from
+    if (callDirectionRef.current === "outbound") {
+      data.to = number;
+      data.from = "agent"; // you can replace with agent identifier
+    } else {
+      data.to = "agent";
+      data.from = callRef.current?.parameters?.From || number;
+    }
 
     try {
       await fetch(CALL_LOG_URL, {
