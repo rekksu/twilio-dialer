@@ -9,6 +9,14 @@ const VERIFY_ACCESS_URL =
 const CALL_LOG_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/createCallLog";
 
+/* ================= HELPER ================= */
+const formatOutboundNumber = (num) => {
+  if (!num) return "";
+  let cleaned = num.replace(/[^\d+]/g, ""); // remove anything except digits and +
+  if (!cleaned.startsWith("+")) cleaned = "+" + cleaned;
+  return cleaned;
+};
+
 /* ================= DEV PHONE COMPONENT ================= */
 export default function DevPhone() {
   const deviceRef = useRef(null);
@@ -115,8 +123,7 @@ export default function DevPhone() {
     callDirectionRef.current = "outbound";
     setStatus("📞 Dialing…");
 
-    // ensure + prefix
-    const formattedNumber = number.startsWith("+") ? number : "+" +number;
+    const formattedNumber = formatOutboundNumber(number);
 
     const call = await deviceRef.current.connect({ params: { To: formattedNumber } });
     callRef.current = call;
@@ -171,14 +178,15 @@ export default function DevPhone() {
     };
 
     if (callDirectionRef.current === "outbound") {
-      const formattedNumber = number.startsWith("+") ? number : "+" + number;
+      const formattedNumber = formatOutboundNumber(number);
       data.to = formattedNumber;
       data.from = "agent";
-      if (customerIdRef.current) data.customerId = customerIdRef.current; // only outbound
+      if (customerIdRef.current) data.customerId = customerIdRef.current;
     } else {
       const fromNumber = callRef.current?.parameters?.From || number;
-      data.to = fromNumber;    // inbound: to = caller number
-      data.from = fromNumber;  // inbound: from = caller number
+      data.to = fromNumber;    
+      data.from = fromNumber;
+      // no customerId for inbound
     }
 
     try {
@@ -275,7 +283,7 @@ const Screen = ({ text }) => (
 /* ================= STYLES ================= */
 const ui = {
   page: { height: "100vh", display: "flex", justifyContent: "center", alignItems: "center", background: "#eef1f5" },
-  phone: { width: 340, background: "#fff", padding: 24, borderRadius: 18, boxShadow: "0 12px 32px rgba(0,0,0,.2)", textAlign: "center" },
+  phone: { width: 360, background: "#fff", padding: 24, borderRadius: 18, boxShadow: "0 12px 32px rgba(0,0,0,.2)", textAlign: "center" },
   status: { margin: "10px 0", fontWeight: "bold" },
   input: { width: "100%", fontSize: 22, padding: 10, textAlign: "center", marginBottom: 10 },
   pad: { display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 10 },
