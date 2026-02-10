@@ -19,17 +19,15 @@ export default function OrbitPhone() {
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
 
-  // --- Detect route type from pathname
-  const pathname = window.location.pathname;
-  const isInboundRoute = pathname.includes("/twilio-dialer");
-  const isOutboundRoute = pathname.includes("/twilio-dialer-outbound");
-
   // --- Read URL params
   const params = new URLSearchParams(window.location.search);
   const agentId = params.get("agentId");
   const accessKey = params.get("accessKey");
   const fromNumber = params.get("from");
   const toNumber = params.get("to");
+
+  // 🔥 Determine if outbound based on presence of 'from' and 'to' params
+  const isOutbound = !!(fromNumber && toNumber);
 
   // --- Verify access
   useEffect(() => {
@@ -91,7 +89,7 @@ export default function OrbitPhone() {
         callRef.current = null;
         
         // 🔥 Auto-close tab after outbound call ends
-        if (isOutboundRoute) {
+        if (isOutbound) {
           setStatus("✅ Call ended. Closing...");
           setTimeout(() => {
             window.close();
@@ -105,8 +103,8 @@ export default function OrbitPhone() {
     await device.register();
     setStatus("✅ Ready");
 
-    // --- If outbound route, auto-initiate call
-    if (isOutboundRoute) {
+    // --- If outbound mode, auto-initiate call
+    if (isOutbound) {
       makeOutbound();
     }
   };
@@ -115,11 +113,6 @@ export default function OrbitPhone() {
   const makeOutbound = async () => {
     if (!deviceRef.current) {
       setStatus("❌ Device not ready");
-      return;
-    }
-
-    if (!fromNumber || !toNumber) {
-      setStatus("❌ Missing from/to number for outbound call");
       return;
     }
 
@@ -158,7 +151,7 @@ export default function OrbitPhone() {
       setStatus("❌ Call rejected");
       
       // 🔥 Auto-close tab after rejecting outbound call
-      if (isOutboundRoute) {
+      if (isOutbound) {
         setTimeout(() => {
           window.close();
         }, 1000);
@@ -181,18 +174,8 @@ export default function OrbitPhone() {
     setMicMuted(!micMuted);
   };
 
-  // --- Route validation
-  if (!isInboundRoute && !isOutboundRoute) {
-    return <Screen text="❌ Invalid route. Use /twilio-dialer or /twilio-dialer-outbound" />;
-  }
-
   if (!authChecked) return <Screen text="🔐 Verifying access…" />;
   if (!authorized) return <Screen text="🚫 Unauthorized" />;
-
-  // --- Outbound route validation
-  if (isOutboundRoute && (!fromNumber || !toNumber)) {
-    return <Screen text="❌ Outbound route requires 'from' and 'to' parameters" />;
-  }
 
   return (
     <div style={ui.page}>
@@ -200,7 +183,7 @@ export default function OrbitPhone() {
         <div style={ui.modal}>
           <div style={ui.modalCard}>
             <h3>Enable Audio</h3>
-            <p>Allow microphone access to {isOutboundRoute ? "make" : "receive"} calls.</p>
+            <p>Allow microphone access to {isOutbound ? "make" : "receive"} calls.</p>
             <button style={ui.primary} onClick={enableAudio}>Enable</button>
           </div>
         </div>
@@ -209,7 +192,7 @@ export default function OrbitPhone() {
       <div style={ui.phone}>
         <h2>📞 Orbit Virtual Phone</h2>
         <div style={ui.badge}>
-          {isOutboundRoute ? "🔵 Outbound Mode" : "🟢 Inbound Mode"}
+          {isOutbound ? "🔵 Outbound Mode" : "🟢 Inbound Mode"}
         </div>
         <div style={ui.status}>{status}</div>
 
