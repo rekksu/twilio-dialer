@@ -128,12 +128,15 @@ export default function OrbitPhone() {
 
     setStatus(`📞 Calling ${toNumber}…`);
 
+    // Start the outbound call
     const call = deviceRef.current.connect({ params: { To: toNumber, From: fromNumber } });
 
-    // 🔹 Only set callRef.current after call is accepted/connected
+    // 🔹 Immediately show mic/hangup UI
+    setInCall(true);
+
+    // 🔹 Attach events
     call.on("accept", () => {
-      callRef.current = call; // now mic & hangup will work
-      setInCall(true);
+      callRef.current = call; // mic & hangup now fully work
       setStatus("✅ Connected");
     });
 
@@ -145,9 +148,7 @@ export default function OrbitPhone() {
       if (isOutbound) setTimeout(() => window.close(), 1000);
     });
 
-    call.on("error", (err) => {
-      setStatus(`❌ Call error: ${err.message}`);
-    });
+    call.on("error", (err) => setStatus(`❌ Call error: ${err.message}`));
   };
 
   // --- Call controls
