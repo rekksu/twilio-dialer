@@ -59,23 +59,25 @@ export default function OrbitPhone() {
     if (!agentId) return setStatus("❌ No agentId provided");
 
     setAudioEnabled(true);
+
+    // 1️⃣ Get microphone permission
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     stream.getTracks().forEach((t) => t.stop());
 
+    // 2️⃣ Create audio element for incoming audio
     audioRef.current = new Audio();
     audioRef.current.autoplay = true;
 
+    // 3️⃣ Get Twilio token
     const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
     const { token } = await res.json();
 
-    const device = new Device(token, {
-      enableRingingState: true,
-      closeProtection: true,
-    });
+    // 4️⃣ Initialize device
+    const device = new Device(token, { enableRingingState: true, closeProtection: true });
     deviceRef.current = device;
     device.audio.incoming(audioRef.current);
 
-    // --- Handle incoming calls
+    // 5️⃣ Handle incoming calls
     device.on("incoming", (call) => {
       callRef.current = call;
       setIncoming(true);
@@ -94,23 +96,30 @@ export default function OrbitPhone() {
         callRef.current = null;
         setStatus("✅ Ready");
       });
+
+      call.on("error", (err) => {
+        setStatus(`❌ Call error: ${err.message}`);
+      });
     });
 
+    // 6️⃣ Register device and wait for it
     await device.register();
     setStatus("✅ Ready");
 
-    // --- If outbound, auto-initiate call
+    // 7️⃣ Now start outbound call if needed
     if (isOutbound) {
-      makeOutbound();
+      // Small delay ensures the device is fully ready
+      setTimeout(() => makeOutbound(), 200);
     }
   };
 
-  // --- Outbound call (agent calls customer directly)
+  // --- Outbound call (browser calls customer directly)
   const makeOutbound = () => {
     if (!deviceRef.current) {
       setStatus("❌ Device not ready");
       return;
     }
+
     setStatus(`📞 Calling ${toNumber}…`);
 
     const call = deviceRef.current.connect({
@@ -130,7 +139,9 @@ export default function OrbitPhone() {
     call.on("disconnect", () => {
       setInCall(false);
       setMicMuted(false);
+      callRef.current = null;
       setStatus("✅ Call ended");
+
       if (isOutbound) {
         setTimeout(() => window.close(), 1000);
       }
@@ -161,11 +172,10 @@ export default function OrbitPhone() {
   };
 
   const hangup = () => {
-    if (callRef.current) {
-      callRef.current.disconnect();
-      setInCall(false);
-      setMicMuted(false);
-    }
+    if (!callRef.current) return;
+    callRef.current.disconnect();
+    setInCall(false);
+    setMicMuted(false);
   };
 
   const toggleMic = () => {
