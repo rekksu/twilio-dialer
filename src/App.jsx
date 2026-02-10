@@ -16,7 +16,7 @@ export default function InboundPhone() {
 
   // ✅ Read agentId from URL
   const params = new URLSearchParams(window.location.search);
-  const agentId = params.get("agentId"); // ?agentId=XXXX
+  const agentId = params.get("agentId"); // e.g., /app_users/nzyw7V0euigyqjQaHj2Mn0PizUD2
 
   // ================= ENABLE AUDIO & INIT DEVICE =================
   const enableAudio = async () => {
@@ -27,39 +27,44 @@ export default function InboundPhone() {
 
     setAudioEnabled(true);
 
-    // Get microphone permission
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach((t) => t.stop());
+    try {
+      // Get microphone permission
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
 
-    audioRef.current = new Audio();
-    audioRef.current.autoplay = true;
+      audioRef.current = new Audio();
+      audioRef.current.autoplay = true;
 
-    // Fetch token for this agent
-    const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
-    const { token } = await res.json();
+      // Use full identity as-is
+      const identity = agentId;
+      const res = await fetch(`${TOKEN_URL}?identity=${encodeURIComponent(identity)}`);
+      const { token } = await res.json();
 
-    // Initialize Twilio Device
-    const device = new Device(token, { enableRingingState: true, closeProtection: true });
-    deviceRef.current = device;
-    device.audio.incoming(audioRef.current);
+      // Initialize Twilio Device
+      const device = new Device(token, { enableRingingState: true, closeProtection: true });
+      deviceRef.current = device;
+      device.audio.incoming(audioRef.current);
 
-    // Listen for incoming calls
-    device.on("incoming", (call) => {
-      callRef.current = call;
-      setIncoming(true);
-      setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
+      // Listen for incoming calls
+      device.on("incoming", (call) => {
+        callRef.current = call;
+        setIncoming(true);
+        setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
 
-      // Listen for disconnect / error
-      call.on("disconnect", () => {
-        setIncoming(false);
-        setInCall(false);
-        setStatus("✅ Ready");
+        call.on("disconnect", () => {
+          setIncoming(false);
+          setInCall(false);
+          setStatus("✅ Ready");
+        });
+        call.on("error", (err) => console.error(err));
       });
-      call.on("error", (err) => console.error(err));
-    });
 
-    await device.register();
-    setStatus("✅ Ready (standby for incoming calls)");
+      await device.register();
+      setStatus("✅ Ready (standby for incoming calls)");
+    } catch (err) {
+      console.error(err);
+      setStatus("❌ Error initializing device");
+    }
   };
 
   // ================= CALL HANDLERS =================
