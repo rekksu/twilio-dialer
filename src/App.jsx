@@ -24,6 +24,8 @@ export default function OrbitPhone() {
   const fromNumber = params.get("from");
   const toNumber = params.get("to");
 
+  const isOutbound = fromNumber && toNumber;
+
   // ------------------ VERIFY ACCESS ------------------
   useEffect(() => {
     const verify = async () => {
@@ -47,7 +49,7 @@ export default function OrbitPhone() {
       }
     };
     verify();
-  }, []);
+  }, [accessKey]);
 
   // ------------------ ENABLE AUDIO ------------------
   const enableAudio = async () => {
@@ -89,7 +91,7 @@ export default function OrbitPhone() {
     }
   };
 
-  // ------------------ CALL HANDLERS ------------------
+  // ------------------ INBOUND CALL HANDLERS ------------------
   const accept = () => {
     callRef.current?.accept();
     setIncoming(false);
@@ -109,12 +111,14 @@ export default function OrbitPhone() {
     setMicMuted(!micMuted);
   };
 
-  // ------------------ OUTBOUND CALL ------------------
+  // ------------------ OUTBOUND AUTOMATIC ------------------
   useEffect(() => {
-    const makeOutbound = async () => {
-      if (!agentId || !fromNumber || !toNumber) return;
+    if (!authorized || !isOutbound) return;
 
+    const startOutbound = async () => {
       setStatus(`📞 Making outbound call to ${toNumber}…`);
+      await enableAudio();
+
       try {
         const res = await fetch(OUTBOUND_URL, {
           method: "POST",
@@ -125,23 +129,29 @@ export default function OrbitPhone() {
             agentId,
           }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error("Failed");
 
-        setStatus(`📞 Outbound call initiated (SID: ${data.callSid})`);
+        const text = await res.text(); // TwiML XML
+        setStatus(`📞 Outbound call initiated`);
 
-        // Auto open new tab for the outbound call UI
-        const win = window.open(`${window.location.origin}/?agentId=${agentId}`, "_blank");
-        // Auto close after 60s
-        setTimeout(() => win?.close(), 60000);
+        // Automatically close tab after 1 minute
+        const timer = setTimeout(() => window.close(), 60000);
+
+        // Optional: listen to device connection for faster tab close
+        const checkCall = setInterval(() => {
+          if (callRef.current && callRef.current.status() === "completed") {
+            clearInterval(timer);
+            clearInterval(checkCall);
+            window.close();
+          }
+        }, 1000);
       } catch (err) {
         console.error(err);
         setStatus("❌ Failed to make outbound call");
       }
     };
 
-    makeOutbound();
-  }, [agentId, fromNumber, toNumber]);
+    startOutbound();
+  }, [authorized, isOutbound, fromNumber, toNumber, agentId]);
 
   if (!authChecked) return <Screen text="🔐 Verifying access…" />;
   if (!authorized) return <Screen text="🚫 Unauthorized" />;
