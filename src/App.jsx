@@ -24,9 +24,7 @@ export default function OrbitPhone() {
   const fromNumber = params.get("from");
   const toNumber = params.get("to");
 
-  const isOutbound = fromNumber && toNumber;
-
-  // ------------------ VERIFY ACCESS ------------------
+  // --- Verify access
   useEffect(() => {
     const verify = async () => {
       if (!accessKey) {
@@ -49,109 +47,61 @@ export default function OrbitPhone() {
       }
     };
     verify();
-  }, [accessKey]);
+  }, []);
 
-  // ------------------ ENABLE AUDIO ------------------
+  // --- Enable Audio + Init Twilio Device
   const enableAudio = async () => {
     if (!agentId) return setStatus("❌ No agentId provided");
-    setAudioEnabled(true);
 
+    setAudioEnabled(true);
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     stream.getTracks().forEach((t) => t.stop());
     audioRef.current = new Audio();
     audioRef.current.autoplay = true;
 
-    try {
-      const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
-      const { token } = await res.json();
+    const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
+    const { token } = await res.json();
 
-      const device = new Device(token, { enableRingingState: true, closeProtection: true });
-      deviceRef.current = device;
-      device.audio.incoming(audioRef.current);
+    const device = new Device(token, { enableRingingState: true, closeProtection: true });
+    deviceRef.current = device;
+    device.audio.incoming(audioRef.current);
 
-      device.on("incoming", (call) => {
-        callRef.current = call;
-        setIncoming(true);
-        setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
-
-        call.on("disconnect", () => {
-          setIncoming(false);
-          setInCall(false);
-          setMicMuted(false);
-          setStatus("✅ Ready");
-        });
-        call.on("error", console.error);
+    device.on("incoming", (call) => {
+      callRef.current = call;
+      setIncoming(true);
+      setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
+      call.on("disconnect", () => {
+        setIncoming(false);
+        setInCall(false);
+        setMicMuted(false);
+        setStatus("✅ Ready");
       });
+    });
 
-      await device.register();
-      setStatus("✅ Ready (standby for calls)");
-    } catch (err) {
-      console.error(err);
-      setStatus("❌ Failed to initialize device");
-    }
+    await device.register();
+    setStatus("✅ Ready");
   };
 
-  // ------------------ INBOUND CALL HANDLERS ------------------
-  const accept = () => {
-    callRef.current?.accept();
-    setIncoming(false);
-    setInCall(true);
-    setStatus("✅ Connected");
-  };
-  const reject = () => {
-    callRef.current?.reject();
-    setIncoming(false);
-    setInCall(false);
-    setStatus("❌ Call rejected");
-  };
-  const hangup = () => callRef.current?.disconnect();
-  const toggleMic = () => {
-    if (!callRef.current) return;
-    callRef.current.mute(!micMuted);
-    setMicMuted(!micMuted);
-  };
-
-  // ------------------ OUTBOUND AUTOMATIC ------------------
   useEffect(() => {
-    if (!authorized || !isOutbound) return;
-
-    const startOutbound = async () => {
-      setStatus(`📞 Making outbound call to ${toNumber}…`);
-      await enableAudio();
-
-      try {
-        const res = await fetch(OUTBOUND_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fromNumber,
-            toNumber,
-            agentId,
-          }),
+    if (fromNumber && toNumber) {
+      // Automatic outbound call
+      fetch(OUTBOUND_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromNumber, toNumber, agentId }),
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.ok) setStatus(`📞 Outbound call to ${toNumber} initiated`);
+          else setStatus("❌ Failed to make outbound call");
         });
+    }
+  }, [fromNumber, toNumber, agentId]);
 
-        const text = await res.text(); // TwiML XML
-        setStatus(`📞 Outbound call initiated`);
-
-        // Automatically close tab after 1 minute
-        const timer = setTimeout(() => window.close(), 60000);
-
-        // Optional: listen to device connection for faster tab close
-        const checkCall = setInterval(() => {
-          if (callRef.current && callRef.current.status() === "completed") {
-            clearInterval(timer);
-            clearInterval(checkCall);
-            window.close();
-          }
-        }, 1000);
-      } catch (err) {
-        console.error(err);
-        setStatus("❌ Failed to make outbound call");
-      }
-    };
-
-    startOutbound();
-  }, [authorized, isOutbound, fromNumber, toNumber, agentId]);
+  const accept = () => { callRef.current?.accept(); setIncoming(false); setInCall(true); setStatus("✅ Connected"); };
+  const reject = () => { callRef.current?.reject(); setIncoming(false); setInCall(false); setStatus("❌ Call rejected"); };
+  const hangup = () => { callRef.current?.disconnect(); };
+  const toggleMic = () => { if (!callRef.current) return; callRef.current.mute(!micMuted); setMicMuted(!micMuted); };
 
   if (!authChecked) return <Screen text="🔐 Verifying access…" />;
   if (!authorized) return <Screen text="🚫 Unauthorized" />;
@@ -192,11 +142,7 @@ export default function OrbitPhone() {
   );
 }
 
-const Screen = ({ text }) => (
-  <div style={{ ...ui.page, textAlign: "center" }}>
-    <div style={ui.phone}>{text}</div>
-  </div>
-);
+const Screen = ({ text }) => <div style={{ ...ui.page, textAlign: "center" }}><div style={ui.phone}>{text}</div></div>;
 
 const ui = {
   page: { height: "100vh", width: "100vw", display: "flex", justifyContent: "center", alignItems: "center", background: "#eef1f5" },
