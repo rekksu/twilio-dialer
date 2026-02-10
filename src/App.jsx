@@ -1,262 +1,192 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
 
-const TOKEN_URL =
+/* ================= CONFIG ================= */
+
+const CLOUD_FUNCTION_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 
+const VERIFY_ACCESS_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
+
+/* ================= APP ================= */
+
 export default function App() {
+  const params = new URLSearchParams(window.location.search);
+
+  const to = params.get("to"); // if present → outbound
+  const accessKey = params.get("accessKey");
+
+  const isOutbound = !!to;
+
   const deviceRef = useRef(null);
   const callRef = useRef(null);
-  const audioRef = useRef(null);
+
   const [status, setStatus] = useState("Initializing…");
-  const [audioEnabled, setAudioEnabled] = useState(false);
-  const [incoming, setIncoming] = useState(false);
   const [inCall, setInCall] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
 
-  // --- URL params
-  const params = new URLSearchParams(window.location.search);
-  const agentId = params.get("agentId");
-  const fromNumber = params.get("from");
-  const toNumber = params.get("to");
+  const [authorized, setAuthorized] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
 
-  // 🔥 Auto-detect mode
-  const isOutbound = !!(fromNumber && toNumber);
+  /* ============ VERIFY ACCESS ============ */
 
-  // Remove body margins for proper centering
   useEffect(() => {
-    document.body.style.margin = "0";
-    document.body.style.padding = "0";
-  }, []);
-
-  // Cleanup
-  useEffect(() => {
-    return () => {
-      if (callRef.current) {
-        console.log("Cleaning up call...");
-        callRef.current.disconnect();
-      }
-      if (deviceRef.current) {
-        console.log("Destroying device...");
-        deviceRef.current.destroy();
-      }
-    };
-  }, []);
-
-  // --- Enable mic + init device
-  const enableAudio = async () => {
-    if (!agentId) {
-      setStatus("❌ Missing agentId");
+    if (!accessKey) {
+      setAuthorized(false);
+      setAuthChecked(true);
       return;
     }
 
-    setAudioEnabled(true);
+    fetch(VERIFY_ACCESS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: accessKey }),
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error("Unauthorized");
+        setAuthorized(true);
+      })
+      .catch(() => setAuthorized(false))
+      .finally(() => setAuthChecked(true));
+  }, []);
 
-    // Ask mic permission
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach((t) => t.stop());
+  /* ============ INIT TWILIO DEVICE ============ */
 
-    audioRef.current = new Audio();
-    audioRef.current.autoplay = true;
+  useEffect(() => {
+    if (!authorized) return;
 
-    // Get token
-    const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
-    const { token } = await res.json();
+    async function init() {
+      setStatus("Fetching token…");
 
-    const device = new Device(token, {
-      closeProtection: true,
-      enableRingingState: true,
-    });
+      const res = await fetch(CLOUD_FUNCTION_URL);
+      const { token } = await res.json();
 
-    device.audio.incoming(audioRef.current);
-    deviceRef.current = device;
-
-    // --- INBOUND HANDLER
-    device.on("incoming", (call) => {
-      if (isOutbound) return; // ❌ outbound never uses incoming
-
-      callRef.current = call;
-      setIncoming(true);
-      setStatus(`📞 Incoming call from ${call.parameters.From}`);
-
-      call.on("accept", () => {
-        console.log("Inbound call accepted");
-        setIncoming(false);
-        setInCall(true);
-        setStatus("✅ Connected");
+      const device = new Device(token, {
+        codecPreferences: ["opus", "pcmu"],
+        enableRingingState: true,
       });
 
-      call.on("disconnect", () => {
-        console.log("Inbound call disconnected");
-        resetCall("✅ Ready");
+      deviceRef.current = device;
+
+      device.on("ready", () => {
+        setStatus(isOutbound ? "Ready to call" : "Waiting for call…");
+        if (isOutbound) startOutbound();
       });
-    });
 
-    device.on("registered", () => {
-      console.log("Device registered");
-      setStatus("✅ Ready");
+      device.on("error", (err) => {
+        console.error(err);
+        setStatus("❌ Device error");
+      });
 
-      // 🔥 Auto-start outbound
-      if (isOutbound) {
-        console.log("Starting outbound call...");
-        startOutbound();
-      }
-    });
+      device.on("incoming", handleIncoming);
 
-    device.on("error", (err) => {
-      console.error("Device error:", err);
-      setStatus(`❌ Device error: ${err.message}`);
-    });
+      await device.register();
+    }
 
-    await device.register();
-  };
+    init();
+  }, [authorized]);
 
-  // --- OUTBOUND
-  const startOutbound = () => {
-    console.log(`Initiating outbound call to ${toNumber} from ${fromNumber}`);
-    setStatus(`📞 Calling ${toNumber}…`);
+  /* ============ INBOUND ============ */
 
-    const call = deviceRef.current.connect({
-      params: {
-        To: toNumber,
-        From: fromNumber,
-      },
-    });
+  const handleIncoming = (call) => {
+    if (callRef.current) {
+      call.reject();
+      return;
+    }
 
     callRef.current = call;
-    setInCall(true);
-
-    console.log("Call object created:", call);
+    setStatus("📞 Incoming call…");
 
     call.on("accept", () => {
-      console.log("Outbound call accepted/connected");
+      setInCall(true);
       setStatus("✅ Connected");
     });
 
     call.on("disconnect", () => {
-      console.log("Outbound call disconnected");
-      resetCall("✅ Call ended");
-      setTimeout(() => {
-        try {
-          window.close();
-        } catch (e) {
-          console.log("Could not close window");
-        }
-      }, 1000);
+      resetCall("📴 Call ended");
+    });
+
+    call.accept();
+  };
+
+  /* ============ OUTBOUND ============ */
+
+  const startOutbound = () => {
+    if (!deviceRef.current || callRef.current) return;
+
+    setStatus("📞 Calling…");
+
+    const call = deviceRef.current.connect({
+      params: { To: to },
+    });
+
+    callRef.current = call;
+
+    call.on("accept", () => {
+      setInCall(true); // 🔑 IMPORTANT FIX
+      setStatus("✅ Connected");
+    });
+
+    call.on("disconnect", () => {
+      resetCall("📴 Call ended");
+      setTimeout(() => window.close(), 1000);
     });
 
     call.on("error", (err) => {
-      console.error("Call error:", err);
-      setStatus(`❌ Call error: ${err.message}`);
-    });
-
-    // Listen for mute events
-    call.on("mute", (isMuted) => {
-      console.log("Mute event fired, isMuted:", isMuted);
-      setMicMuted(isMuted);
+      console.error(err);
+      resetCall("❌ Call failed");
     });
   };
 
-  // --- Controls
-  const accept = () => {
-    console.log("Accepting incoming call");
-    callRef.current?.accept();
-  };
+  /* ============ CONTROLS ============ */
 
-  const reject = () => {
-    console.log("Rejecting incoming call");
-    callRef.current?.reject();
+  const toggleMic = () => {
+    if (!callRef.current || !inCall) return;
+
+    const newMuted = !callRef.current.isMuted();
+    callRef.current.mute(newMuted);
+    setMicMuted(newMuted);
   };
 
   const hangup = () => {
-    console.log("Hangup button clicked");
-    console.log("Current call ref:", callRef.current);
-    if (callRef.current) {
-      console.log("Disconnecting call...");
-      callRef.current.disconnect();
-    } else {
-      console.log("No active call to disconnect");
-    }
-  };
-
-  const toggleMic = () => {
-    console.log("Toggle mic clicked");
-    console.log("Current call ref:", callRef.current);
-    
-    if (!callRef.current) {
-      console.log("No active call");
-      return;
-    }
-
-    const currentMuteState = callRef.current.isMuted();
-    console.log("Current mute state:", currentMuteState);
-    
-    const newMuteState = !currentMuteState;
-    console.log("Setting mute to:", newMuteState);
-    
-    callRef.current.mute(newMuteState);
-    setMicMuted(newMuteState);
-    
-    console.log("Mute state after toggle:", callRef.current.isMuted());
+    if (!callRef.current) return;
+    callRef.current.disconnect();
   };
 
   const resetCall = (msg) => {
-    console.log("Resetting call state:", msg);
-    setIncoming(false);
+    callRef.current = null;
     setInCall(false);
     setMicMuted(false);
-    callRef.current = null;
     setStatus(msg);
   };
 
+  /* ============ ACCESS GATE ============ */
+
+  if (!authChecked) {
+    return <div style={ui.page}>🔐 Verifying access…</div>;
+  }
+
+  if (!authorized) {
+    return <div style={ui.page}>🚫 Unauthorized</div>;
+  }
+
+  /* ============ UI ============ */
+
   return (
     <div style={ui.page}>
-      {!audioEnabled && (
-        <div style={ui.modal}>
-          <div style={ui.modalCard}>
-            <h2>Enable Audio</h2>
-            <p>
-              Allow microphone access to{" "}
-              {isOutbound ? "start the call" : "receive calls"}
-            </p>
-            <button style={ui.primary} onClick={enableAudio}>
-              Enable
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div style={ui.phone}>
-        <h1>📞 Orbit Phone</h1>
-        <div style={ui.badge}>
-          {isOutbound ? "🔵 Outbound Mode" : "🟢 Inbound Mode"}
-        </div>
-        <div style={ui.status}>{status}</div>
-
-        {incoming && (
-          <div style={ui.row}>
-            <button style={ui.accept} onClick={accept}>
-              Accept
-            </button>
-            <button style={ui.reject} onClick={reject}>
-              Reject
-            </button>
-          </div>
-        )}
+      <div style={ui.card}>
+        <h2>Orbit Dialer</h2>
+        <p>{status}</p>
 
         {inCall && (
-          <div style={ui.row}>
-            <button 
-              style={{
-                ...ui.primary,
-                background: micMuted ? "#d32f2f" : "#1976d2"
-              }} 
-              onClick={toggleMic}
-            >
-              {micMuted ? "🔇 Mic Off" : "🎤 Mic On"}
+          <div style={ui.controls}>
+            <button onClick={toggleMic} style={ui.btn}>
+              {micMuted ? "🎙️ Mic Off" : "🎤 Mic On"}
             </button>
-            <button style={ui.reject} onClick={hangup}>
-              Hang Up
+
+            <button onClick={hangup} style={{ ...ui.btn, background: "#e74c3c" }}>
+              ❌ Hang Up
             </button>
           </div>
         )}
@@ -265,78 +195,38 @@ export default function App() {
   );
 }
 
-// --- UI styles
+/* ================= STYLES ================= */
+
 const ui = {
   page: {
     height: "100vh",
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
-    background: "#eef1f5",
-    margin: 0,
-    padding: 0,
+    background: "#0f172a",
+    color: "#fff",
+    fontFamily: "Arial",
   },
-  phone: {
-    minWidth: 360,
-    background: "#fff",
-    padding: 24,
-    borderRadius: 18,
-    boxShadow: "0 12px 32px rgba(0,0,0,.2)",
+  card: {
+    width: 320,
+    padding: 20,
+    borderRadius: 12,
+    background: "#020617",
     textAlign: "center",
   },
-  badge: {
-    fontSize: 12,
-    fontWeight: "bold",
-    marginBottom: 8,
-  },
-  status: {
-    margin: "12px 0",
-    fontWeight: "bold",
-  },
-  row: {
+  controls: {
+    marginTop: 20,
     display: "flex",
+    justifyContent: "center",
     gap: 12,
-    justifyContent: "center",
   },
-  modal: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,.5)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10,
-  },
-  modalCard: {
-    background: "#fff",
-    padding: 30,
-    borderRadius: 14,
-    textAlign: "center",
-  },
-  primary: {
-    padding: "10px 20px",
-    background: "#1976d2",
-    color: "#fff",
-    border: "none",
+  btn: {
+    padding: "10px 14px",
     borderRadius: 8,
-    cursor: "pointer",
-  },
-  accept: {
-    background: "#2e7d32",
-    color: "#fff",
-    padding: 12,
-    borderRadius: 10,
     border: "none",
-    minWidth: 100,
     cursor: "pointer",
-  },
-  reject: {
-    background: "#d32f2f",
+    background: "#2563eb",
     color: "#fff",
-    padding: 12,
-    borderRadius: 10,
-    border: "none",
-    minWidth: 100,
-    cursor: "pointer",
+    fontSize: 14,
   },
 };
