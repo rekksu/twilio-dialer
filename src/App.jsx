@@ -8,7 +8,6 @@ export default function App() {
   const deviceRef = useRef(null);
   const callRef = useRef(null);
   const audioRef = useRef(null);
-
   const [status, setStatus] = useState("Initializing…");
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [incoming, setIncoming] = useState(false);
@@ -23,6 +22,12 @@ export default function App() {
 
   // 🔥 Auto-detect mode
   const isOutbound = !!(fromNumber && toNumber);
+
+  // Remove body margins for proper centering
+  useEffect(() => {
+    document.body.style.margin = "0";
+    document.body.style.padding = "0";
+  }, []);
 
   // Cleanup
   useEffect(() => {
@@ -116,7 +121,13 @@ export default function App() {
 
     call.on("disconnect", () => {
       resetCall("✅ Call ended");
-      setTimeout(() => window.close(), 1000);
+      setTimeout(() => {
+        try {
+          window.close();
+        } catch (e) {
+          console.log("Could not close window");
+        }
+      }, 1000);
     });
 
     call.on("error", (err) => {
@@ -128,12 +139,18 @@ export default function App() {
   // --- Controls
   const accept = () => callRef.current?.accept();
   const reject = () => callRef.current?.reject();
-  const hangup = () => callRef.current?.disconnect();
+  
+  const hangup = () => {
+    if (callRef.current) {
+      callRef.current.disconnect();
+    }
+  };
 
   const toggleMic = () => {
     if (!callRef.current) return;
-    callRef.current.mute(!micMuted);
-    setMicMuted(!micMuted);
+    const newMutedState = !micMuted;
+    callRef.current.mute(newMutedState);
+    setMicMuted(newMutedState);
   };
 
   const resetCall = (msg) => {
@@ -149,7 +166,7 @@ export default function App() {
       {!audioEnabled && (
         <div style={ui.modal}>
           <div style={ui.modalCard}>
-            <h3>Enable Audio</h3>
+            <h2>Enable Audio</h2>
             <p>
               Allow microphone access to{" "}
               {isOutbound ? "start the call" : "receive calls"}
@@ -162,7 +179,7 @@ export default function App() {
       )}
 
       <div style={ui.phone}>
-        <h2>📞 Orbit Phone</h2>
+        <h1>📞 Orbit Phone</h1>
         <div style={ui.badge}>
           {isOutbound ? "🔵 Outbound Mode" : "🟢 Inbound Mode"}
         </div>
@@ -181,10 +198,7 @@ export default function App() {
 
         {inCall && (
           <div style={ui.row}>
-            <button
-              style={micMuted ? ui.reject : ui.accept}
-              onClick={toggleMic}
-            >
+            <button style={ui.primary} onClick={toggleMic}>
               {micMuted ? "Mic Off" : "Mic On"}
             </button>
             <button style={ui.reject} onClick={hangup}>
@@ -205,6 +219,8 @@ const ui = {
     justifyContent: "center",
     alignItems: "center",
     background: "#eef1f5",
+    margin: 0,
+    padding: 0,
   },
   phone: {
     minWidth: 360,
@@ -219,8 +235,15 @@ const ui = {
     fontWeight: "bold",
     marginBottom: 8,
   },
-  status: { margin: "12px 0", fontWeight: "bold" },
-  row: { display: "flex", gap: 12, justifyContent: "center" },
+  status: {
+    margin: "12px 0",
+    fontWeight: "bold",
+  },
+  row: {
+    display: "flex",
+    gap: 12,
+    justifyContent: "center",
+  },
   modal: {
     position: "fixed",
     inset: 0,
@@ -251,6 +274,7 @@ const ui = {
     borderRadius: 10,
     border: "none",
     minWidth: 100,
+    cursor: "pointer",
   },
   reject: {
     background: "#d32f2f",
@@ -259,5 +283,6 @@ const ui = {
     borderRadius: 10,
     border: "none",
     minWidth: 100,
+    cursor: "pointer",
   },
 };
