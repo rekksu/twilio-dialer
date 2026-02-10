@@ -1,98 +1,142 @@
-// Softphone.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
 
-const Softphone = ({ agentId }) => {
-  const [device, setDevice] = useState(null);
-  const [status, setStatus] = useState("disconnected");
-  const [incomingCall, setIncomingCall] = useState(null);
+/* ================= CONFIG ================= */
+const TOKEN_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 
-  useEffect(() => {
-    if (!agentId) return;
+/* ================= DEV PHONE COMPONENT ================= */
+export default function DevPhone() {
+  const deviceRef = useRef(null);
+  const callRef = useRef(null);
+  const audioRef = useRef(null);
 
-    console.log("[Softphone] Fetching token for agentId:", agentId);
+  const [status, setStatus] = useState("Initializing…");
+  const [incoming, setIncoming] = useState(false);
+  const [inCall, setInCall] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  const [duration, setDuration] = useState(0);
 
-    fetch(
-      `https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken?identity=nzyw7V0euigyqjQaHj2Mn0PizUD2`
-    )
-      .then((res) => res.json())
-      .then((data) => {
-        console.log("[Softphone] Token response:", data);
+  const startedAtRef = useRef(null);
+  const answeredRef = useRef(false);
 
-        if (!data.token) {
-          console.error("[Softphone] No token returned from server");
-          setStatus("error: no token");
-          return;
-        }
+  const callDirectionRef = useRef("inbound");
 
-        const twilioDevice = new Device(data.token, {
-          codecPreferences: ["opus", "pcmu"],
-          edge: "roaming",
-          debug: true, // enables SDK logging
-        });
+  /* ================= GET AGENT ID FROM URL ================= */
+  const agentId = new URLSearchParams(window.location.search).get("agentId");
 
-        // Logging Twilio device events
-        twilioDevice.on("ready", () => {
-          console.log("[Twilio Device] Ready");
-          setStatus("ready");
-        });
+  /* ================= ENABLE AUDIO & INIT DEVICE ================= */
+  const enableAudio = async () => {
+    setAudioEnabled(true);
 
-        twilioDevice.on("error", (err) => {
-          console.error("[Twilio Device] Error:", err);
-          setStatus(`error: ${err.message}`);
-        });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((t) => t.stop());
 
-        twilioDevice.on("incoming", (connection) => {
-          console.log("[Twilio Device] Incoming call:", connection.parameters);
-          setIncomingCall(connection);
+    audioRef.current = new Audio();
+    audioRef.current.autoplay = true;
 
-          // Auto accept after prompt
-          if (window.confirm(`Incoming call from ${connection.parameters.From}. Accept?`)) {
-            connection.accept();
-          } else {
-            connection.reject();
-          }
-        });
+    // Fetch Twilio token for dynamic agent
+    const tokenRes = await fetch(`${TOKEN_URL}?identity=${encodeURIComponent(agentId)}`);
+    const { token } = await tokenRes.json();
 
-        twilioDevice.on("connect", (conn) => {
-          console.log("[Twilio Device] Connected:", conn.parameters);
-          setStatus("in call");
-        });
+    const device = new Device(token, { enableRingingState: true, closeProtection: true });
+    deviceRef.current = device;
+    device.audio.incoming(audioRef.current);
 
-        twilioDevice.on("disconnect", (conn) => {
-          console.log("[Twilio Device] Disconnected:", conn.parameters);
-          setStatus("ready");
-          setIncomingCall(null);
-        });
+    device.on("incoming", (call) => {
+      callRef.current = call;
+      answeredRef.current = false;
+      setIncoming(true);
+      setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
 
-        setDevice(twilioDevice);
-      })
-      .catch((err) => {
-        console.error("[Softphone] Failed to fetch token:", err);
-        setStatus("error: fetch failed");
-      });
-  }, [agentId]);
+      call.on("disconnect", cleanup);
+      call.on("error", cleanup);
+    });
 
-  const hangUp = () => {
-    if (device && device.activeConnection()) {
-      device.activeConnection().disconnect();
-    }
+    await device.register();
+    setStatus("✅ Ready for incoming calls");
   };
 
+  /* ================= CALL HANDLERS ================= */
+  const onConnected = () => {
+    startedAtRef.current = Date.now();
+    answeredRef.current = true;
+    setIncoming(false);
+    setInCall(true);
+    setStatus("✅ Connected");
+  };
+
+  const cleanup = () => {
+    startedAtRef.current = null;
+    setIncoming(false);
+    setInCall(false);
+    setMicMuted(false);
+    setStatus("✅ Ready for incoming calls");
+  };
+
+  const accept = () => { callRef.current?.accept(); onConnected(); };
+  const reject = () => { callRef.current?.reject(); answeredRef.current = false; cleanup(); };
+  const hangup = () => callRef.current?.disconnect();
+  const toggleMic = () => { const next = !micMuted; callRef.current?.mute(next); setMicMuted(next); };
+
+  /* ================= TIMER ================= */
+  useEffect(() => {
+    let t;
+    if (inCall && startedAtRef.current) {
+      t = setInterval(() => setDuration(Math.floor((Date.now() - startedAtRef.current) / 1000)), 1000);
+    }
+    return () => clearInterval(t);
+  }, [inCall]);
+
+  /* ================= UI ================= */
   return (
-    <div style={{ border: "1px solid #ccc", padding: 20, maxWidth: 400 }}>
-      <h3>Softphone (Agent ID: {agentId})</h3>
-      <p>Status: {status}</p>
-      {incomingCall && (
-        <div>
-          <p>Incoming call from: {incomingCall.parameters.From}</p>
-          <button onClick={() => incomingCall.accept()}>Accept</button>
-          <button onClick={() => incomingCall.reject()}>Reject</button>
+    <div style={ui.page}>
+      {!audioEnabled && (
+        <div style={ui.modal}>
+          <div style={ui.modalCard}>
+            <h3>Enable Audio</h3>
+            <button style={ui.primary} onClick={enableAudio}>Enable</button>
+          </div>
         </div>
       )}
-      {status === "in call" && <button onClick={hangUp}>Hang Up</button>}
+
+      <div style={ui.phone}>
+        <h2>📞 Orbit Softphone</h2>
+        <div style={ui.status}>{status}</div>
+
+        {incoming && (
+          <div style={ui.row}>
+            <button style={ui.accept} onClick={accept}>Accept</button>
+            <button style={ui.reject} onClick={reject}>Reject</button>
+          </div>
+        )}
+
+        {inCall && (
+          <>
+            <p>⏱ {duration}s</p>
+            <div style={ui.row}>
+              <button style={micMuted ? ui.reject : ui.accept} onClick={toggleMic}>
+                {micMuted ? "Mic Off" : "Mic On"}
+              </button>
+              <button style={ui.reject} onClick={hangup}>Hang Up</button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
-};
+}
 
-export default Softphone;
+/* ================= UI STYLES ================= */
+const ui = {
+  page: { height:"100vh", width:"100vw", display:"flex", justifyContent:"center", alignItems:"center", background:"#eef1f5" },
+  phone: { minWidth:360, maxWidth:"90%", background:"#fff", padding:24, borderRadius:18, boxShadow:"0 12px 32px rgba(0,0,0,.2)", textAlign:"center", display:"flex", flexDirection:"column", alignItems:"center", gap:12 },
+  status: { margin:"10px 0", fontWeight:"bold" },
+  accept: { background:"#2e7d32", color:"#fff", padding:12, borderRadius:10, border:"none", minWidth:100, cursor:"pointer" },
+  reject: { background:"#d32f2f", color:"#fff", padding:12, borderRadius:10, border:"none", minWidth:100, cursor:"pointer" },
+  row: { display:"flex", gap:12, justifyContent:"center", width:"100%" },
+  modal: { position:"fixed", inset:0, background:"rgba(0,0,0,.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:10 },
+  modalCard: { background:"#fff", padding:30, borderRadius:14, textAlign:"center" },
+  primary: { padding:"10px 20px", background:"#1976d2", color:"#fff", border:"none", borderRadius:8, cursor:"pointer" },
+};
