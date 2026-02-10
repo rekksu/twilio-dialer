@@ -18,13 +18,14 @@ export default function OrbitPhone() {
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
 
+  // Read URL params
   const params = new URLSearchParams(window.location.search);
   const agentId = params.get("agentId");
   const accessKey = params.get("accessKey");
   const fromNumber = params.get("from");
   const toNumber = params.get("to");
 
-  // --- Verify access
+  // ---------------- Access verification ----------------
   useEffect(() => {
     const verify = async () => {
       if (!accessKey) {
@@ -47,15 +48,16 @@ export default function OrbitPhone() {
       }
     };
     verify();
-  }, []);
+  }, [accessKey]);
 
-  // --- Enable Audio + Init Twilio Device
+  // ---------------- Enable Audio & Twilio Device ----------------
   const enableAudio = async () => {
     if (!agentId) return setStatus("❌ No agentId provided");
 
     setAudioEnabled(true);
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     stream.getTracks().forEach((t) => t.stop());
+
     audioRef.current = new Audio();
     audioRef.current.autoplay = true;
 
@@ -70,38 +72,91 @@ export default function OrbitPhone() {
       callRef.current = call;
       setIncoming(true);
       setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
+
       call.on("disconnect", () => {
         setIncoming(false);
         setInCall(false);
         setMicMuted(false);
         setStatus("✅ Ready");
       });
+
+      call.on("error", console.error);
     });
 
     await device.register();
-    setStatus("✅ Ready");
+    setStatus("✅ Ready (standby for calls)");
   };
 
-  useEffect(() => {
-    if (fromNumber && toNumber) {
-      // Automatic outbound call
-      fetch(OUTBOUND_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fromNumber, toNumber, agentId }),
-      })
-        .then(res => res.json())
-        .then(data => {
-          if (data.ok) setStatus(`📞 Outbound call to ${toNumber} initiated`);
-          else setStatus("❌ Failed to make outbound call");
-        });
-    }
-  }, [fromNumber, toNumber, agentId]);
+  // ---------------- Call Handlers ----------------
+  const accept = () => {
+    callRef.current?.accept();
+    setIncoming(false);
+    setInCall(true);
+    setStatus("✅ Connected");
+  };
+  const reject = () => {
+    callRef.current?.reject();
+    setIncoming(false);
+    setInCall(false);
+    setStatus("❌ Call rejected");
+  };
+  const hangup = () => {
+    callRef.current?.disconnect();
+  };
+  const toggleMic = () => {
+    if (!callRef.current) return;
+    callRef.current.mute(!micMuted);
+    setMicMuted(!micMuted);
+  };
 
-  const accept = () => { callRef.current?.accept(); setIncoming(false); setInCall(true); setStatus("✅ Connected"); };
-  const reject = () => { callRef.current?.reject(); setIncoming(false); setInCall(false); setStatus("❌ Call rejected"); };
-  const hangup = () => { callRef.current?.disconnect(); };
-  const toggleMic = () => { if (!callRef.current) return; callRef.current.mute(!micMuted); setMicMuted(!micMuted); };
+  // ---------------- Outbound Call (auto if URL has from/to) ----------------
+  useEffect(() => {
+    const makeOutbound = async () => {
+      if (!fromNumber || !toNumber) return;
+      if (inCall) return; // prevent retrigger
+
+      try {
+        const res = await fetch(OUTBOUND_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fromNumber, toNumber, agentId }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setStatus(`📞 Outbound call to ${toNumber} initiated`);
+          setInCall(true);
+
+          // Poll Twilio call status to auto-close tab when finished
+          const pollCall = async () => {
+            try {
+              const callRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${data.accountSid}/Calls/${data.callSid}.json`, {
+                headers: {
+                  Authorization: "Basic " + btoa(`${data.accountSid}:${data.authToken}`)
+                }
+              });
+              const callData = await callRes.json();
+              if (["completed", "busy", "canceled", "failed", "no-answer"].includes(callData.status)) {
+                window.close();
+              } else {
+                setTimeout(pollCall, 3000);
+              }
+            } catch (err) {
+              console.error("Polling call error:", err);
+              setTimeout(pollCall, 5000);
+            }
+          };
+          pollCall();
+        } else {
+          setStatus("❌ Failed to make outbound call");
+        }
+      } catch (err) {
+        console.error(err);
+        setStatus("❌ Failed to make outbound call");
+      }
+    };
+
+    makeOutbound();
+  }, [fromNumber, toNumber, agentId, inCall]);
 
   if (!authChecked) return <Screen text="🔐 Verifying access…" />;
   if (!authorized) return <Screen text="🚫 Unauthorized" />;
@@ -142,7 +197,11 @@ export default function OrbitPhone() {
   );
 }
 
-const Screen = ({ text }) => <div style={{ ...ui.page, textAlign: "center" }}><div style={ui.phone}>{text}</div></div>;
+const Screen = ({ text }) => (
+  <div style={{ ...ui.page, textAlign: "center" }}>
+    <div style={ui.phone}>{text}</div>
+  </div>
+);
 
 const ui = {
   page: { height: "100vh", width: "100vw", display: "flex", justifyContent: "center", alignItems: "center", background: "#eef1f5" },
