@@ -17,8 +17,7 @@ export default function OrbitPhone({ twilioNumbers }) {
   const [micMuted, setMicMuted] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
-  const [selectedNumber, setSelectedNumber] = useState("");
-  const [dialTo, setDialTo] = useState("");
+  const [selectedNumber, setSelectedNumber] = useState(twilioNumbers[0] || "");
 
   // Read URL params
   const params = new URLSearchParams(window.location.search);
@@ -118,35 +117,42 @@ export default function OrbitPhone({ twilioNumbers }) {
     setMicMuted(next);
   };
 
-  // ===================== Outbound Call =====================
-  
-  const startOutboundCall = async (from = selectedNumber, to = dialTo) => {
-    if (!from || !to) return setStatus("❌ Missing numbers");
+  // ===================== Auto Outbound =====================
+  const startOutboundCall = async () => {
+    if (!selectedNumber || !fromNumber || !toNumber) return;
 
     try {
       const res = await fetch(OUTBOUND_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fromNumber: from, toNumber: to, agentId }),
+        body: JSON.stringify({
+          fromNumber: selectedNumber,
+          toNumber,
+          agentId,
+        }),
       });
-      if (!res.ok) throw new Error("Failed to start call");
-      setStatus(`📞 Outbound call to ${to} initiated`);
 
-      // Optional: open new tab for outbound call UI
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Failed to start call");
+      }
+
+      setStatus(`📞 Outbound call to ${toNumber} initiated`);
+
+      // Open new tab for call (optional)
       const win = window.open(`${window.location.origin}/?agentId=${agentId}`, "_blank");
-      setTimeout(() => win?.close(), 60000); // auto-close after 1 min
+      setTimeout(() => win?.close(), 60000);
     } catch (err) {
       console.error(err);
-      setStatus("❌ Failed to make outbound call");
+      setStatus(`❌ Failed to make outbound call: ${err.message}`);
     }
   };
 
-  // ===================== Auto outbound if URL params exist =====================
+  // Auto outbound if URL params exist
   useEffect(() => {
     if (audioEnabled && authorized && fromNumber && toNumber) {
       setSelectedNumber(fromNumber);
-      setDialTo(toNumber);
-      startOutboundCall(fromNumber, toNumber);
+      startOutboundCall();
     }
   }, [audioEnabled, authorized]);
 
@@ -170,23 +176,7 @@ export default function OrbitPhone({ twilioNumbers }) {
         <h2>📞 Orbit Virtual Phone</h2>
         <div style={ui.status}>{status}</div>
 
-        {/* Outbound Dialer */}
-        <div style={{ marginBottom: 12 }}>
-          <select value={selectedNumber} onChange={(e) => setSelectedNumber(e.target.value)}>
-            {(twilioNumbers || []).map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
-          <input
-            placeholder="Enter number to dial"
-            value={dialTo}
-            onChange={(e) => setDialTo(e.target.value)}
-            style={{ marginLeft: 8 }}
-          />
-          <button style={ui.primary} onClick={() => startOutboundCall()}>Call</button>
-        </div>
-
-        {/* Incoming call */}
+        {/* Incoming Call */}
         {incoming && (
           <div style={ui.row}>
             <button style={ui.accept} onClick={accept}>Accept</button>
@@ -194,7 +184,7 @@ export default function OrbitPhone({ twilioNumbers }) {
           </div>
         )}
 
-        {/* In-call controls */}
+        {/* In-Call */}
         {inCall && (
           <div style={ui.row}>
             <button style={micMuted ? ui.reject : ui.accept} onClick={toggleMic}>
@@ -208,14 +198,13 @@ export default function OrbitPhone({ twilioNumbers }) {
   );
 }
 
-// Minimal screen for messages
+// Minimal screen
 const Screen = ({ text }) => (
   <div style={{ ...ui.page, textAlign: "center" }}>
     <div style={ui.phone}>{text}</div>
   </div>
 );
 
-// ===================== UI Styles =====================
 const ui = {
   page: {
     height: "100vh",
