@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
 
-// Cloud Function URL to get Twilio token
+// URLs for your backend Cloud Functions
 const TOKEN_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 const VERIFY_ACCESS_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
+const OUTBOUND_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/outboundCall";
 
 export default function OrbitPhone() {
   const deviceRef = useRef(null);
@@ -18,14 +19,16 @@ export default function OrbitPhone() {
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
 
-  // Read URL params
+  // --- Read URL params
   const params = new URLSearchParams(window.location.search);
   const agentId = params.get("agentId");
   const accessKey = params.get("accessKey");
-  const toNumber = params.get("to"); // if present, this is outbound
-  const isOutbound = Boolean(toNumber);
+  const fromNumber = params.get("from");
+  const toNumber = params.get("to");
 
-  // Verify access
+  const isOutbound = fromNumber && toNumber;
+
+  // --- Verify access
   useEffect(() => {
     const verify = async () => {
       if (!accessKey) {
@@ -50,7 +53,7 @@ export default function OrbitPhone() {
     verify();
   }, []);
 
-  // Enable audio + init Twilio Device (both inbound & outbound)
+  // --- Enable audio + init Twilio Device (BOTH inbound and outbound)
   const enableAudio = async () => {
     if (!agentId) return setStatus("❌ No agentId provided");
 
@@ -71,46 +74,88 @@ export default function OrbitPhone() {
       callRef.current = call;
       setIncoming(true);
       setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
+      
+      call.on("accept", () => {
+        setIncoming(false);
+        setInCall(true);
+        setStatus("✅ Connected");
+      });
 
       call.on("disconnect", () => {
         setIncoming(false);
         setInCall(false);
         setMicMuted(false);
+        callRef.current = null;
         setStatus("✅ Ready");
       });
     });
 
     await device.register();
     setStatus("✅ Ready");
+
+    // --- If outbound mode, auto-initiate call
+    if (isOutbound) {
+      makeOutbound();
+    }
   };
 
-  // Auto-outbound call after device is ready
-  useEffect(() => {
-    if (!isOutbound || !audioEnabled || !deviceRef.current) return;
+  // --- Auto outbound call
+  const makeOutbound = async () => {
+    if (!deviceRef.current) {
+      setStatus("❌ Device not ready");
+      return;
+    }
 
-    const call = deviceRef.current.connect({ To: toNumber });
-    callRef.current = call;
-    setInCall(true);
-    setStatus(`📞 Calling ${toNumber}...`);
-
-    call.on("disconnect", () => {
-      setInCall(false);
-      setMicMuted(false);
-      setStatus("✅ Call ended");
-    });
-
-    call.on("error", (err) => {
-      console.error("Outbound call error:", err);
-      setInCall(false);
-      setStatus("❌ Call failed");
-    });
-  }, [isOutbound, audioEnabled]);
+    setStatus(`📞 Initiating outbound call to ${toNumber}…`);
+    try {
+      const res = await fetch(OUTBOUND_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromNumber, toNumber, agentId }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setStatus(`❌ Failed to make outbound call: ${data.error || "Unknown error"}`);
+      }
+      // Note: The call will come in via the "incoming" event handler above
+    } catch (err) {
+      setStatus(`❌ Error: ${err.message}`);
+    }
+  };
 
   // --- Call controls
-  const accept = () => { callRef.current?.accept(); setIncoming(false); setInCall(true); setStatus("✅ Connected"); };
-  const reject = () => { callRef.current?.reject(); setIncoming(false); setInCall(false); setStatus("❌ Call rejected"); };
-  const hangup = () => { callRef.current?.disconnect(); setInCall(false); setStatus("❌ Call ended"); };
-  const toggleMic = () => { if (!callRef.current) return; callRef.current.mute(!micMuted); setMicMuted(!micMuted); };
+  const accept = () => {
+    if (callRef.current) {
+      callRef.current.accept();
+      setIncoming(false);
+      setInCall(true);
+      setStatus("✅ Connected");
+    }
+  };
+
+  const reject = () => {
+    if (callRef.current) {
+      callRef.current.reject();
+      setIncoming(false);
+      setInCall(false);
+      setStatus("❌ Call rejected");
+    }
+  };
+
+  const hangup = () => {
+    if (callRef.current) {
+      callRef.current.disconnect();
+      setInCall(false);
+      setMicMuted(false);
+      setStatus("✅ Ready");
+    }
+  };
+
+  const toggleMic = () => {
+    if (!callRef.current) return;
+    callRef.current.mute(!micMuted);
+    setMicMuted(!micMuted);
+  };
 
   if (!authChecked) return <Screen text="🔐 Verifying access…" />;
   if (!authorized) return <Screen text="🚫 Unauthorized" />;
@@ -121,17 +166,16 @@ export default function OrbitPhone() {
         <div style={ui.modal}>
           <div style={ui.modalCard}>
             <h3>Enable Audio</h3>
-            <p>Allow microphone access to make or receive calls.</p>
+            <p>Allow microphone access to {isOutbound ? "make" : "receive"} calls.</p>
             <button style={ui.primary} onClick={enableAudio}>Enable</button>
           </div>
         </div>
       )}
-
+      
       <div style={ui.phone}>
-        <h2>{isOutbound ? "📞 Outbound Call" : "📞 Orbit Virtual Phone"}</h2>
+        <h2>📞 Orbit Virtual Phone</h2>
         <div style={ui.status}>{status}</div>
 
-        {/* Incoming call buttons (inbound only) */}
         {incoming && (
           <div style={ui.row}>
             <button style={ui.accept} onClick={accept}>Accept</button>
@@ -139,7 +183,6 @@ export default function OrbitPhone() {
           </div>
         )}
 
-        {/* Active call controls */}
         {inCall && (
           <div style={ui.row}>
             <button style={micMuted ? ui.reject : ui.accept} onClick={toggleMic}>
@@ -156,7 +199,7 @@ export default function OrbitPhone() {
 // --- Reusable screen component
 const Screen = ({ text }) => <div style={{ ...ui.page, textAlign: "center" }}><div style={ui.phone}>{text}</div></div>;
 
-// --- UI Styles
+// --- UI Styles (same as before)
 const ui = {
   page: { height: "100vh", width: "100vw", display: "flex", justifyContent: "center", alignItems: "center", background: "#eef1f5" },
   phone: { minWidth: 360, maxWidth: "90%", background: "#fff", padding: 24, borderRadius: 18, boxShadow: "0 12px 32px rgba(0,0,0,.2)", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 },
