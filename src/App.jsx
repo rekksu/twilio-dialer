@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
 
-// URLs for your backend Cloud Functions
+// Cloud Function URL to get Twilio token
 const TOKEN_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 const VERIFY_ACCESS_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
-const OUTBOUND_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/outboundCall";
 
 export default function OrbitPhone() {
   const deviceRef = useRef(null);
@@ -19,16 +18,14 @@ export default function OrbitPhone() {
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
 
-  // --- Read URL params
+  // Read URL params
   const params = new URLSearchParams(window.location.search);
   const agentId = params.get("agentId");
   const accessKey = params.get("accessKey");
-  const fromNumber = params.get("from");
-  const toNumber = params.get("to");
+  const toNumber = params.get("to"); // if present, this is outbound
+  const isOutbound = Boolean(toNumber);
 
-  const isOutbound = fromNumber && toNumber;
-
-  // --- Verify access
+  // Verify access
   useEffect(() => {
     const verify = async () => {
       if (!accessKey) {
@@ -53,7 +50,7 @@ export default function OrbitPhone() {
     verify();
   }, []);
 
-  // --- Enable audio + init Twilio Device (inbound only)
+  // Enable audio + init Twilio Device (both inbound & outbound)
   const enableAudio = async () => {
     if (!agentId) return setStatus("❌ No agentId provided");
 
@@ -74,6 +71,7 @@ export default function OrbitPhone() {
       callRef.current = call;
       setIncoming(true);
       setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
+
       call.on("disconnect", () => {
         setIncoming(false);
         setInCall(false);
@@ -86,32 +84,27 @@ export default function OrbitPhone() {
     setStatus("✅ Ready");
   };
 
-  // --- Auto outbound call
+  // Auto-outbound call after device is ready
   useEffect(() => {
-    if (!isOutbound) return;
+    if (!isOutbound || !audioEnabled || !deviceRef.current) return;
 
-    const makeOutbound = async () => {
-      setStatus(`📞 Initiating outbound call to ${toNumber}…`);
-      try {
-        const res = await fetch(OUTBOUND_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fromNumber, toNumber, agentId }),
-        });
-        const data = await res.json();
-        if (data.ok) {
-          setStatus(`📞 Outbound call to ${toNumber} initiated`);
-          setInCall(true); // show call controls
-        } else {
-          setStatus(`❌ Failed to make outbound call: ${data.error || "Unknown error"}`);
-        }
-      } catch (err) {
-        setStatus(`❌ Error: ${err.message}`);
-      }
-    };
+    const call = deviceRef.current.connect({ To: toNumber });
+    callRef.current = call;
+    setInCall(true);
+    setStatus(`📞 Calling ${toNumber}...`);
 
-    makeOutbound();
-  }, [fromNumber, toNumber, agentId]);
+    call.on("disconnect", () => {
+      setInCall(false);
+      setMicMuted(false);
+      setStatus("✅ Call ended");
+    });
+
+    call.on("error", (err) => {
+      console.error("Outbound call error:", err);
+      setInCall(false);
+      setStatus("❌ Call failed");
+    });
+  }, [isOutbound, audioEnabled]);
 
   // --- Call controls
   const accept = () => { callRef.current?.accept(); setIncoming(false); setInCall(true); setStatus("✅ Connected"); };
@@ -124,54 +117,38 @@ export default function OrbitPhone() {
 
   return (
     <div style={ui.page}>
-      {isOutbound ? (
-        // --- OUTBOUND UI
-        <div style={ui.phone}>
-          <h2>📞 Outbound Call</h2>
-          <div style={ui.status}>{status}</div>
-          {inCall && (
-            <div style={ui.row}>
-              <button style={micMuted ? ui.reject : ui.accept} onClick={toggleMic}>
-                {micMuted ? "Mic Off" : "Mic On"}
-              </button>
-              <button style={ui.reject} onClick={hangup}>Hang Up</button>
-            </div>
-          )}
-        </div>
-      ) : (
-        // --- INBOUND UI
-        <>
-          {!audioEnabled && (
-            <div style={ui.modal}>
-              <div style={ui.modalCard}>
-                <h3>Enable Audio</h3>
-                <p>Allow microphone access to receive calls.</p>
-                <button style={ui.primary} onClick={enableAudio}>Enable</button>
-              </div>
-            </div>
-          )}
-          <div style={ui.phone}>
-            <h2>📞 Orbit Virtual Phone</h2>
-            <div style={ui.status}>{status}</div>
-
-            {incoming && (
-              <div style={ui.row}>
-                <button style={ui.accept} onClick={accept}>Accept</button>
-                <button style={ui.reject} onClick={reject}>Reject</button>
-              </div>
-            )}
-
-            {inCall && (
-              <div style={ui.row}>
-                <button style={micMuted ? ui.reject : ui.accept} onClick={toggleMic}>
-                  {micMuted ? "Mic Off" : "Mic On"}
-                </button>
-                <button style={ui.reject} onClick={hangup}>Hang Up</button>
-              </div>
-            )}
+      {!audioEnabled && (
+        <div style={ui.modal}>
+          <div style={ui.modalCard}>
+            <h3>Enable Audio</h3>
+            <p>Allow microphone access to make or receive calls.</p>
+            <button style={ui.primary} onClick={enableAudio}>Enable</button>
           </div>
-        </>
+        </div>
       )}
+
+      <div style={ui.phone}>
+        <h2>{isOutbound ? "📞 Outbound Call" : "📞 Orbit Virtual Phone"}</h2>
+        <div style={ui.status}>{status}</div>
+
+        {/* Incoming call buttons (inbound only) */}
+        {incoming && (
+          <div style={ui.row}>
+            <button style={ui.accept} onClick={accept}>Accept</button>
+            <button style={ui.reject} onClick={reject}>Reject</button>
+          </div>
+        )}
+
+        {/* Active call controls */}
+        {inCall && (
+          <div style={ui.row}>
+            <button style={micMuted ? ui.reject : ui.accept} onClick={toggleMic}>
+              {micMuted ? "Mic Off" : "Mic On"}
+            </button>
+            <button style={ui.reject} onClick={hangup}>Hang Up</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
