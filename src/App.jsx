@@ -32,8 +32,14 @@ export default function App() {
   // Cleanup
   useEffect(() => {
     return () => {
-      callRef.current?.disconnect();
-      deviceRef.current?.destroy();
+      if (callRef.current) {
+        console.log("Cleaning up call...");
+        callRef.current.disconnect();
+      }
+      if (deviceRef.current) {
+        console.log("Destroying device...");
+        deviceRef.current.destroy();
+      }
     };
   }, []);
 
@@ -74,27 +80,31 @@ export default function App() {
       setStatus(`📞 Incoming call from ${call.parameters.From}`);
 
       call.on("accept", () => {
+        console.log("Inbound call accepted");
         setIncoming(false);
         setInCall(true);
         setStatus("✅ Connected");
       });
 
       call.on("disconnect", () => {
+        console.log("Inbound call disconnected");
         resetCall("✅ Ready");
       });
     });
 
     device.on("registered", () => {
+      console.log("Device registered");
       setStatus("✅ Ready");
 
       // 🔥 Auto-start outbound
       if (isOutbound) {
+        console.log("Starting outbound call...");
         startOutbound();
       }
     });
 
     device.on("error", (err) => {
-      console.error(err);
+      console.error("Device error:", err);
       setStatus(`❌ Device error: ${err.message}`);
     });
 
@@ -103,6 +113,7 @@ export default function App() {
 
   // --- OUTBOUND
   const startOutbound = () => {
+    console.log(`Initiating outbound call to ${toNumber} from ${fromNumber}`);
     setStatus(`📞 Calling ${toNumber}…`);
 
     const call = deviceRef.current.connect({
@@ -115,11 +126,15 @@ export default function App() {
     callRef.current = call;
     setInCall(true);
 
+    console.log("Call object created:", call);
+
     call.on("accept", () => {
+      console.log("Outbound call accepted/connected");
       setStatus("✅ Connected");
     });
 
     call.on("disconnect", () => {
+      console.log("Outbound call disconnected");
       resetCall("✅ Call ended");
       setTimeout(() => {
         try {
@@ -131,29 +146,62 @@ export default function App() {
     });
 
     call.on("error", (err) => {
-      console.error(err);
+      console.error("Call error:", err);
       setStatus(`❌ Call error: ${err.message}`);
+    });
+
+    // Listen for mute events
+    call.on("mute", (isMuted) => {
+      console.log("Mute event fired, isMuted:", isMuted);
+      setMicMuted(isMuted);
     });
   };
 
   // --- Controls
-  const accept = () => callRef.current?.accept();
-  const reject = () => callRef.current?.reject();
-  
+  const accept = () => {
+    console.log("Accepting incoming call");
+    callRef.current?.accept();
+  };
+
+  const reject = () => {
+    console.log("Rejecting incoming call");
+    callRef.current?.reject();
+  };
+
   const hangup = () => {
+    console.log("Hangup button clicked");
+    console.log("Current call ref:", callRef.current);
     if (callRef.current) {
+      console.log("Disconnecting call...");
       callRef.current.disconnect();
+    } else {
+      console.log("No active call to disconnect");
     }
   };
 
   const toggleMic = () => {
-    if (!callRef.current) return;
-    const newMutedState = !micMuted;
-    callRef.current.mute(newMutedState);
-    setMicMuted(newMutedState);
+    console.log("Toggle mic clicked");
+    console.log("Current call ref:", callRef.current);
+    
+    if (!callRef.current) {
+      console.log("No active call");
+      return;
+    }
+
+    const currentMuteState = callRef.current.isMuted();
+    console.log("Current mute state:", currentMuteState);
+    
+    const newMuteState = !currentMuteState;
+    console.log("Setting mute to:", newMuteState);
+    
+    callRef.current.mute(newMuteState);
+    setMicMuted(newMuteState);
+    
+    console.log("Mute state after toggle:", callRef.current.isMuted());
   };
 
   const resetCall = (msg) => {
+    console.log("Resetting call state:", msg);
     setIncoming(false);
     setInCall(false);
     setMicMuted(false);
@@ -198,8 +246,14 @@ export default function App() {
 
         {inCall && (
           <div style={ui.row}>
-            <button style={ui.primary} onClick={toggleMic}>
-              {micMuted ? "Mic Off" : "Mic On"}
+            <button 
+              style={{
+                ...ui.primary,
+                background: micMuted ? "#d32f2f" : "#1976d2"
+              }} 
+              onClick={toggleMic}
+            >
+              {micMuted ? "🔇 Mic Off" : "🎤 Mic On"}
             </button>
             <button style={ui.reject} onClick={hangup}>
               Hang Up
