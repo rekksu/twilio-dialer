@@ -185,7 +185,15 @@ const Screen = ({ text }) => (
 
 // ================= STYLES =================
 const ui = {
-  page: { height: "100vh", display: "flex", justifyContent: "center", alignItems: "center", background: "#eef1f5" },
+  page: {
+  height: "100vh",
+  width: "100vw",
+  display: "flex",
+  justifyContent: "center",
+  alignItems: "center",
+  background: "#eef1f5",
+},
+
   phone: { minWidth: 360, background: "#fff", padding: 24, borderRadius: 18, boxShadow: "0 12px 32px rgba(0,0,0,.2)", textAlign: "center" },
   status: { margin: "10px 0", fontWeight: "bold" },
   row: { display: "flex", gap: 12, justifyContent: "center" },
