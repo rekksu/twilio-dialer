@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Device } from "@twilio/voice-sdk";
 
 const Softphone = ({ agentId }) => {
@@ -7,7 +7,7 @@ const Softphone = ({ agentId }) => {
   const [incomingCall, setIncomingCall] = useState(null);
   const connectionRef = useRef(null);
 
-  // ✅ Get Twilio Voice Token
+  // 1️⃣ Fetch Twilio Voice Token
   const fetchToken = async () => {
     try {
       const res = await fetch(
@@ -21,13 +21,13 @@ const Softphone = ({ agentId }) => {
     }
   };
 
-  // ✅ Initialize Twilio Device
+  // 2️⃣ Initialize Twilio Device
   useEffect(() => {
     const initDevice = async () => {
       const token = await fetchToken();
       if (!token) return;
 
-      const dev = new Device(token, { edge: "roaming", codecPreferences: ["opus", "pcmu"] });
+      const dev = new Device(token, { codecPreferences: ["opus", "pcmu"], edge: "roaming" });
       setDevice(dev);
 
       dev.on("ready", () => setStatus("ready"));
@@ -36,13 +36,13 @@ const Softphone = ({ agentId }) => {
         setStatus("error");
       });
 
-      // Incoming call event
+      // Incoming call
       dev.on("incoming", (conn) => {
-        console.log("Incoming call:", conn.parameters.From);
+        console.log("Incoming call from:", conn.parameters.From);
         setIncomingCall(conn);
       });
 
-      // Call connected/disconnected
+      // Call connected / disconnected
       dev.on("connect", (conn) => {
         console.log("Call connected");
         connectionRef.current = conn;
@@ -62,7 +62,7 @@ const Softphone = ({ agentId }) => {
     };
   }, [agentId]);
 
-  // ✅ Answer incoming call
+  // 3️⃣ Answer incoming call
   const answerCall = () => {
     if (incomingCall) {
       incomingCall.accept();
@@ -70,23 +70,16 @@ const Softphone = ({ agentId }) => {
     }
   };
 
-  // ✅ Hangup current call
+  // 4️⃣ Hangup current call
   const hangupCall = () => {
     if (connectionRef.current) {
       connectionRef.current.disconnect();
     }
   };
 
-  // ✅ Make outbound call
-  const makeCall = (toNumber) => {
-    if (device) {
-      device.connect({ To: toNumber });
-    }
-  };
-
   return (
     <div style={{ padding: 20, border: "1px solid #ccc", width: 300 }}>
-      <h3>Softphone</h3>
+      <h3>Agent Softphone</h3>
       <p>Status: {status}</p>
 
       {incomingCall && (
@@ -94,20 +87,6 @@ const Softphone = ({ agentId }) => {
           <p>Incoming call from {incomingCall.parameters.From}</p>
           <button onClick={answerCall}>Answer</button>
           <button onClick={() => incomingCall.reject()}>Reject</button>
-        </div>
-      )}
-
-      {status === "ready" && (
-        <div>
-          <input id="outboundNumber" placeholder="Enter number" />
-          <button
-            onClick={() => {
-              const number = document.getElementById("outboundNumber").value;
-              makeCall(number);
-            }}
-          >
-            Call
-          </button>
         </div>
       )}
 
