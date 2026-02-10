@@ -2,9 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
 
 // URLs for your backend Cloud Functions
-const TOKEN_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
-const VERIFY_ACCESS_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
-const OUTBOUND_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/outboundCall";
+const TOKEN_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
+const VERIFY_ACCESS_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
 
 export default function OrbitPhone() {
   const deviceRef = useRef(null);
@@ -26,7 +27,6 @@ export default function OrbitPhone() {
   const fromNumber = params.get("from");
   const toNumber = params.get("to");
 
-  // 🔥 Determine if outbound based on presence of 'from' and 'to' params
   const isOutbound = !!(fromNumber && toNumber);
 
   // --- Verify access
@@ -61,21 +61,26 @@ export default function OrbitPhone() {
     setAudioEnabled(true);
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     stream.getTracks().forEach((t) => t.stop());
+
     audioRef.current = new Audio();
     audioRef.current.autoplay = true;
 
     const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
     const { token } = await res.json();
 
-    const device = new Device(token, { enableRingingState: true, closeProtection: true });
+    const device = new Device(token, {
+      enableRingingState: true,
+      closeProtection: true,
+    });
     deviceRef.current = device;
     device.audio.incoming(audioRef.current);
 
+    // --- Handle incoming calls
     device.on("incoming", (call) => {
       callRef.current = call;
       setIncoming(true);
       setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
-      
+
       call.on("accept", () => {
         setIncoming(false);
         setInCall(true);
@@ -87,50 +92,53 @@ export default function OrbitPhone() {
         setInCall(false);
         setMicMuted(false);
         callRef.current = null;
-        
-        // 🔥 Auto-close tab after outbound call ends
-        if (isOutbound) {
-          setStatus("✅ Call ended. Closing...");
-          setTimeout(() => {
-            window.close();
-          }, 1000);
-        } else {
-          setStatus("✅ Ready");
-        }
+        setStatus("✅ Ready");
       });
     });
 
     await device.register();
     setStatus("✅ Ready");
 
-    // --- If outbound mode, auto-initiate call
+    // --- If outbound, auto-initiate call
     if (isOutbound) {
       makeOutbound();
     }
   };
 
-  // --- Auto outbound call
-  const makeOutbound = async () => {
+  // --- Outbound call (agent calls customer directly)
+  const makeOutbound = () => {
     if (!deviceRef.current) {
       setStatus("❌ Device not ready");
       return;
     }
+    setStatus(`📞 Calling ${toNumber}…`);
 
-    setStatus(`📞 Initiating outbound call to ${toNumber}…`);
-    try {
-      const res = await fetch(OUTBOUND_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fromNumber, toNumber, agentId }),
-      });
-      const data = await res.json();
-      if (!data.ok) {
-        setStatus(`❌ Failed to make outbound call: ${data.error || "Unknown error"}`);
+    const call = deviceRef.current.connect({
+      params: {
+        To: toNumber,
+        From: fromNumber,
+      },
+    });
+
+    callRef.current = call;
+    setInCall(true);
+
+    call.on("accept", () => {
+      setStatus("✅ Connected");
+    });
+
+    call.on("disconnect", () => {
+      setInCall(false);
+      setMicMuted(false);
+      setStatus("✅ Call ended");
+      if (isOutbound) {
+        setTimeout(() => window.close(), 1000);
       }
-      // Note: The call will come in via the "incoming" event handler above
-    } catch (err) {
-      setStatus(`❌ Error: ${err.message}`);
-    }
+    });
+
+    call.on("error", (err) => {
+      setStatus(`❌ Call error: ${err.message}`);
+    });
   };
 
   // --- Call controls
@@ -149,13 +157,6 @@ export default function OrbitPhone() {
       setIncoming(false);
       setInCall(false);
       setStatus("❌ Call rejected");
-      
-      // 🔥 Auto-close tab after rejecting outbound call
-      if (isOutbound) {
-        setTimeout(() => {
-          window.close();
-        }, 1000);
-      }
     }
   };
 
@@ -164,7 +165,6 @@ export default function OrbitPhone() {
       callRef.current.disconnect();
       setInCall(false);
       setMicMuted(false);
-      // Status will be set in the disconnect handler
     }
   };
 
@@ -184,22 +184,26 @@ export default function OrbitPhone() {
           <div style={ui.modalCard}>
             <h3>Enable Audio</h3>
             <p>Allow microphone access to {isOutbound ? "make" : "receive"} calls.</p>
-            <button style={ui.primary} onClick={enableAudio}>Enable</button>
+            <button style={ui.primary} onClick={enableAudio}>
+              Enable
+            </button>
           </div>
         </div>
       )}
-      
+
       <div style={ui.phone}>
         <h2>📞 Orbit Virtual Phone</h2>
-        <div style={ui.badge}>
-          {isOutbound ? "🔵 Outbound Mode" : "🟢 Inbound Mode"}
-        </div>
+        <div style={ui.badge}>{isOutbound ? "🔵 Outbound Mode" : "🟢 Inbound Mode"}</div>
         <div style={ui.status}>{status}</div>
 
         {incoming && (
           <div style={ui.row}>
-            <button style={ui.accept} onClick={accept}>Accept</button>
-            <button style={ui.reject} onClick={reject}>Reject</button>
+            <button style={ui.accept} onClick={accept}>
+              Accept
+            </button>
+            <button style={ui.reject} onClick={reject}>
+              Reject
+            </button>
           </div>
         )}
 
@@ -208,7 +212,9 @@ export default function OrbitPhone() {
             <button style={micMuted ? ui.reject : ui.accept} onClick={toggleMic}>
               {micMuted ? "Mic Off" : "Mic On"}
             </button>
-            <button style={ui.reject} onClick={hangup}>Hang Up</button>
+            <button style={ui.reject} onClick={hangup}>
+              Hang Up
+            </button>
           </div>
         )}
       </div>
@@ -225,26 +231,26 @@ const Screen = ({ text }) => (
 
 // --- UI Styles
 const ui = {
-  page: { 
-    height: "100vh", 
-    width: "100vw", 
-    display: "flex", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    background: "#eef1f5" 
+  page: {
+    height: "100vh",
+    width: "100vw",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    background: "#eef1f5",
   },
-  phone: { 
-    minWidth: 360, 
-    maxWidth: "90%", 
-    background: "#fff", 
-    padding: 24, 
-    borderRadius: 18, 
-    boxShadow: "0 12px 32px rgba(0,0,0,.2)", 
-    textAlign: "center", 
-    display: "flex", 
-    flexDirection: "column", 
-    alignItems: "center", 
-    gap: 12 
+  phone: {
+    minWidth: 360,
+    maxWidth: "90%",
+    background: "#fff",
+    padding: 24,
+    borderRadius: 18,
+    boxShadow: "0 12px 32px rgba(0,0,0,.2)",
+    textAlign: "center",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 12,
   },
   badge: {
     padding: "6px 12px",
@@ -254,55 +260,55 @@ const ui = {
     background: "#e3f2fd",
     color: "#1976d2",
   },
-  status: { 
-    margin: "10px 0", 
-    fontWeight: "bold" 
+  status: {
+    margin: "10px 0",
+    fontWeight: "bold",
   },
-  row: { 
-    display: "flex", 
-    gap: 12, 
-    justifyContent: "center", 
-    width: "100%" 
+  row: {
+    display: "flex",
+    gap: 12,
+    justifyContent: "center",
+    width: "100%",
   },
-  modal: { 
-    position: "fixed", 
-    inset: 0, 
-    background: "rgba(0,0,0,.5)", 
-    display: "flex", 
-    alignItems: "center", 
-    justifyContent: "center", 
-    zIndex: 10 
+  modal: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,.5)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
   },
-  modalCard: { 
-    background: "#fff", 
-    padding: 30, 
-    borderRadius: 14, 
-    textAlign: "center" 
+  modalCard: {
+    background: "#fff",
+    padding: 30,
+    borderRadius: 14,
+    textAlign: "center",
   },
-  primary: { 
-    padding: "10px 20px", 
-    background: "#1976d2", 
-    color: "#fff", 
-    border: "none", 
-    borderRadius: 8, 
-    cursor: "pointer" 
+  primary: {
+    padding: "10px 20px",
+    background: "#1976d2",
+    color: "#fff",
+    border: "none",
+    borderRadius: 8,
+    cursor: "pointer",
   },
-  accept: { 
-    background: "#2e7d32", 
-    color: "#fff", 
-    padding: 12, 
-    borderRadius: 10, 
-    border: "none", 
-    minWidth: 100, 
-    cursor: "pointer" 
+  accept: {
+    background: "#2e7d32",
+    color: "#fff",
+    padding: 12,
+    borderRadius: 10,
+    border: "none",
+    minWidth: 100,
+    cursor: "pointer",
   },
-  reject: { 
-    background: "#d32f2f", 
-    color: "#fff", 
-    padding: 12, 
-    borderRadius: 10, 
-    border: "none", 
-    minWidth: 100, 
-    cursor: "pointer" 
+  reject: {
+    background: "#d32f2f",
+    color: "#fff",
+    padding: 12,
+    borderRadius: 10,
+    border: "none",
+    minWidth: 100,
+    cursor: "pointer",
   },
 };
