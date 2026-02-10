@@ -13,9 +13,7 @@ const Softphone = ({ agentId }) => {
     console.log("[Softphone] Fetching token for agentId:", agentId);
 
     fetch(
-      `https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken?identity=${encodeURIComponent(
-        agentId
-      )}`
+      `https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken?identity=nzyw7V0euigyqjQaHj2Mn0PizUD2`
     )
       .then((res) => res.json())
       .then((data) => {
