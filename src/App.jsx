@@ -1,156 +1,228 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
 
-const TOKEN_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
-const VERIFY_ACCESS_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
-const OUTBOUND_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/outboundCall";
+/* ================= CONFIG ================= */
+const TOKEN_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
+const VERIFY_ACCESS_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
+const CALL_LOG_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/createCallLog";
 
-export default function OrbitPhone({ twilioNumbers }) {
+/* ================= HELPER ================= */
+const formatOutboundNumber = (num) => {
+  if (!num) return "";
+  let cleaned = num.replace(/[^\d]/g, ""); // remove anything except digits
+  if (!cleaned.startsWith("+")) cleaned = "+" + cleaned;
+  return cleaned;
+};
+
+/* ================= DEV PHONE COMPONENT ================= */
+export default function DevPhone() {
   const deviceRef = useRef(null);
   const callRef = useRef(null);
   const audioRef = useRef(null);
+  const startedAtRef = useRef(null);
+  const savedRef = useRef(false);
+  const orgIdRef = useRef(null);
 
+  const [number, setNumber] = useState("");
   const [status, setStatus] = useState("Initializing…");
   const [incoming, setIncoming] = useState(false);
   const [inCall, setInCall] = useState(false);
-  const [audioEnabled, setAudioEnabled] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [audioEnabled, setAudioEnabled] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
-  const [selectedNumber, setSelectedNumber] = useState("");
-  const [dialTo, setDialTo] = useState("");
 
-  // Read URL params
-  const params = new URLSearchParams(window.location.search);
-  const agentId = params.get("agentId");
-  const accessKey = params.get("accessKey");
-  const fromNumber = params.get("from");
-  const toNumber = params.get("to");
+  const callDirectionRef = useRef("outbound");
+  const customerIdRef = useRef(null);
+  const answeredRef = useRef(false); // track if inbound call was answered
 
-  // ===================== Verify Access =====================
+  /* ================= VERIFY ACCESS & GET URL NUMBER ================= */
   useEffect(() => {
-    const verify = async () => {
+    const run = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const accessKey = params.get("accessKey");
+      const toNumber = params.get("to");
+      const customerId = params.get("customerId");
+
+      if (toNumber) setNumber(toNumber);
+      if (customerId) customerIdRef.current = customerId;
+
       if (!accessKey) {
-        setAuthorized(false);
+        setStatus("🚫 Unauthorized");
         setAuthChecked(true);
         return;
       }
+
       try {
         const res = await fetch(VERIFY_ACCESS_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ key: accessKey }),
         });
-        if (!res.ok) throw new Error("Unauthorized");
+
+        if (!res.ok) {
+          setStatus("🚫 Access denied");
+          setAuthChecked(true);
+          return;
+        }
+
+        const data = await res.json();
+        orgIdRef.current = data.orgId;
+
         setAuthorized(true);
+        setAuthChecked(true);
       } catch (err) {
         console.error(err);
-        setAuthorized(false);
-      } finally {
+        setStatus("🚫 Verification failed");
         setAuthChecked(true);
       }
     };
-    verify();
+    run();
   }, []);
 
-  // ===================== Enable Audio + Init Twilio =====================
+  /* ================= ENABLE AUDIO & INIT DEVICE ================= */
   const enableAudio = async () => {
-    if (!agentId) return setStatus("❌ No agentId provided");
     setAudioEnabled(true);
 
-    // Ask microphone permission
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     stream.getTracks().forEach((t) => t.stop());
 
     audioRef.current = new Audio();
     audioRef.current.autoplay = true;
 
-    const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
+    const res = await fetch(`${TOKEN_URL}?identity=agent`);
     const { token } = await res.json();
 
     const device = new Device(token, { enableRingingState: true, closeProtection: true });
     deviceRef.current = device;
     device.audio.incoming(audioRef.current);
 
-    // Handle incoming call
     device.on("incoming", (call) => {
       callRef.current = call;
+      savedRef.current = false;
+      answeredRef.current = false;
+      callDirectionRef.current = "inbound";
       setIncoming(true);
       setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
 
-      call.on("disconnect", () => {
-        setIncoming(false);
-        setInCall(false);
-        setMicMuted(false);
-        setStatus("✅ Ready");
-      });
-
-      call.on("error", (err) => console.error(err));
+      call.on("disconnect", cleanup);
+      call.on("error", cleanup);
     });
 
     await device.register();
-    setStatus("✅ Ready (standby for calls)");
+    setStatus("✅ Ready");
   };
 
-  // ===================== Call Handlers =====================
-  const accept = () => {
-    callRef.current?.accept();
+  /* ================= OUTBOUND CALL ================= */
+  const dial = async () => {
+    if (!deviceRef.current || !number) return;
+
+    savedRef.current = false;
+    callDirectionRef.current = "outbound";
+    setStatus("📞 Dialing…");
+
+    const formattedNumber = formatOutboundNumber(number);
+
+    const call = await deviceRef.current.connect({ params: { To: formattedNumber } });
+    callRef.current = call;
+
+    call.on("accept", onConnected);
+    call.on("disconnect", cleanup);
+    call.on("error", cleanup);
+  };
+
+  /* ================= CALL HANDLERS ================= */
+  const onConnected = () => {
+    startedAtRef.current = Date.now();
+    answeredRef.current = true; // mark as answered if inbound
     setIncoming(false);
     setInCall(true);
     setStatus("✅ Connected");
   };
 
-  const reject = () => {
-    callRef.current?.reject();
+  const cleanup = () => {
+    saveCall();
+    startedAtRef.current = null;
     setIncoming(false);
     setInCall(false);
-    setStatus("❌ Call rejected");
+    setMicMuted(false);
+    setStatus("✅ Ready");
   };
 
-  const hangup = () => {
-    callRef.current?.disconnect();
-  };
+  /* ================= TIMER ================= */
+  useEffect(() => {
+    let t;
+    if (inCall && startedAtRef.current) {
+      t = setInterval(() => setDuration(Math.floor((Date.now() - startedAtRef.current) / 1000)), 1000);
+    }
+    return () => clearInterval(t);
+  }, [inCall]);
 
-  const toggleMic = () => {
-    if (!callRef.current) return;
-    const next = !micMuted;
-    callRef.current.mute(next);
-    setMicMuted(next);
-  };
+  /* ================= SAVE CALL LOG ================= */
+  const saveCall = async () => {
+    if (savedRef.current) return;
+    savedRef.current = true;
 
-  // ===================== Outbound Call =====================
-  
-  const startOutboundCall = async (from = selectedNumber, to = dialTo) => {
-    if (!from || !to) return setStatus("❌ Missing numbers");
+    const startedAt = startedAtRef.current ? new Date(startedAtRef.current).toISOString() : null;
+    const endedAt = new Date().toISOString();
+    const dur = startedAtRef.current ? Math.floor((Date.now() - startedAtRef.current) / 1000) : 0;
+
+    let callStatus = "ended";
+
+    // inbound special cases
+    if (callDirectionRef.current === "inbound") {
+      if (!answeredRef.current && !inCall && !incoming) callStatus = "rejected";
+      if (!answeredRef.current && !inCall && incoming === false) callStatus = "no_answer";
+      if (answeredRef.current) callStatus = "answered";
+    }
+
+    const data = {
+      orgId: orgIdRef.current,
+      status: callStatus,
+      startedAt,
+      endedAt,
+      durationSeconds: dur,
+      direction: callDirectionRef.current,
+    };
+
+    if (callDirectionRef.current === "outbound") {
+      const formattedNumber = formatOutboundNumber(number);
+      data.to = formattedNumber;
+      data.from = "agent";
+      if (customerIdRef.current) data.customerId = customerIdRef.current;
+    } else {
+      const fromNumber = callRef.current?.parameters?.From || number;
+      data.to = fromNumber;
+      data.from = fromNumber;
+      // no customerId for inbound
+    }
 
     try {
-      const res = await fetch(OUTBOUND_URL, {
+      await fetch(CALL_LOG_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fromNumber: from, toNumber: to, agentId }),
+        body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error("Failed to start call");
-      setStatus(`📞 Outbound call to ${to} initiated`);
-
-      // Optional: open new tab for outbound call UI
-      const win = window.open(`${window.location.origin}/?agentId=${agentId}`, "_blank");
-      setTimeout(() => win?.close(), 60000); // auto-close after 1 min
+      console.log("✅ Call log saved", data);
     } catch (err) {
-      console.error(err);
-      setStatus("❌ Failed to make outbound call");
+      console.error("❌ Failed to save call log", err);
     }
   };
 
-  // ===================== Auto outbound if URL params exist =====================
-  useEffect(() => {
-    if (audioEnabled && authorized && fromNumber && toNumber) {
-      setSelectedNumber(fromNumber);
-      setDialTo(toNumber);
-      startOutboundCall(fromNumber, toNumber);
-    }
-  }, [audioEnabled, authorized]);
+  /* ================= ACTIONS ================= */
+  const accept = () => { callRef.current?.accept(); onConnected(); };
+  const reject = () => { callRef.current?.reject(); answeredRef.current = false; cleanup(); };
+  const hangup = () => callRef.current?.disconnect();
+  const toggleMic = () => { const next = !micMuted; callRef.current?.mute(next); setMicMuted(next); };
 
-  // ===================== Render =====================
+  const press = (v) => setNumber((n) => n + v);
+  const backspace = () => setNumber((n) => n.slice(0, -1));
+
+  /* ================= UI ================= */
   if (!authChecked) return <Screen text="🔐 Verifying access…" />;
   if (!authorized) return <Screen text="🚫 Unauthorized" />;
 
@@ -160,7 +232,6 @@ export default function OrbitPhone({ twilioNumbers }) {
         <div style={ui.modal}>
           <div style={ui.modalCard}>
             <h3>Enable Audio</h3>
-            <p>Allow microphone access to receive calls.</p>
             <button style={ui.primary} onClick={enableAudio}>Enable</button>
           </div>
         </div>
@@ -170,23 +241,26 @@ export default function OrbitPhone({ twilioNumbers }) {
         <h2>📞 Orbit Virtual Phone</h2>
         <div style={ui.status}>{status}</div>
 
-        {/* Outbound Dialer */}
-        <div style={{ marginBottom: 12 }}>
-          <select value={selectedNumber} onChange={(e) => setSelectedNumber(e.target.value)}>
-            {(twilioNumbers || []).map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
-          <input
-            placeholder="Enter number to dial"
-            value={dialTo}
-            onChange={(e) => setDialTo(e.target.value)}
-            style={{ marginLeft: 8 }}
-          />
-          <button style={ui.primary} onClick={() => startOutboundCall()}>Call</button>
-        </div>
+        {!inCall && !incoming && (
+          <>
+            <input
+              style={ui.input}
+              value={number}
+              onChange={(e) => {
+                let val = e.target.value;
+                // Ensure it always starts with +
+                if (!val.startsWith("+")) val = "+" + val.replace(/\+/g, "");
+                // Allow only digits after +
+                val = "+" + val.slice(1).replace(/[^\d]/g, "");
+                setNumber(val);
+              }}
+              onFocus={(e) => e.target.select()} // optional: auto-select all when clicked
+            />
+            <DialPad onPress={press} onBack={backspace} />
+            <button style={ui.call} onClick={dial}>Call</button>
+          </>
+        )}
 
-        {/* Incoming call */}
         {incoming && (
           <div style={ui.row}>
             <button style={ui.accept} onClick={accept}>Accept</button>
@@ -194,28 +268,38 @@ export default function OrbitPhone({ twilioNumbers }) {
           </div>
         )}
 
-        {/* In-call controls */}
         {inCall && (
-          <div style={ui.row}>
-            <button style={micMuted ? ui.reject : ui.accept} onClick={toggleMic}>
-              {micMuted ? "Mic Off" : "Mic On"}
-            </button>
-            <button style={ui.reject} onClick={hangup}>Hang Up</button>
-          </div>
+          <>
+            <p>⏱ {duration}s</p>
+            <div style={ui.row}>
+              <button style={micMuted ? ui.reject : ui.accept} onClick={toggleMic}>
+                {micMuted ? "Mic Off" : "Mic On"}
+              </button>
+              <button style={ui.reject} onClick={hangup}>Hang Up</button>
+            </div>
+          </>
         )}
       </div>
     </div>
   );
 }
 
-// Minimal screen for messages
+/* ================= DIAL PAD ================= */
+function DialPad({ onPress, onBack }) {
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"];
+  return (
+    <div style={ui.pad}>
+      {keys.map((k) => <button key={k} style={ui.key} onClick={() => onPress(k)}>{k}</button>)}
+      <button style={ui.key} onClick={onBack}>⌫</button>
+    </div>
+  );
+}
+
 const Screen = ({ text }) => (
-  <div style={{ ...ui.page, textAlign: "center" }}>
-    <div style={ui.phone}>{text}</div>
-  </div>
+  <div style={{ ...ui.page, textAlign: "center" }}><div style={ui.phone}>{text}</div></div>
 );
 
-// ===================== UI Styles =====================
+/* ================= STYLES ================= */
 const ui = {
   page: {
     height: "100vh",
@@ -239,41 +323,14 @@ const ui = {
     gap: 12,
   },
   status: { margin: "10px 0", fontWeight: "bold" },
+  input: { width: "auto", minWidth: 200, fontSize: 22, padding: 10, textAlign: "center", marginBottom: 10, borderRadius: 10, border: "1px solid #ccc" },
+  pad: { display: "grid", gridTemplateColumns: "repeat(3, 60px)", gap: 10, justifyContent: "center", marginBottom: 10 },
+  key: { padding: 16, fontSize: 18, borderRadius: 12, border: "1px solid #ccc", cursor: "pointer" },
+  call: { background: "#2e7d32", color: "#fff", padding: 14, borderRadius: 12, border: "none", fontWeight: "bold", minWidth: 120, cursor: "pointer" },
+  accept: { background: "#2e7d32", color: "#fff", padding: 12, borderRadius: 10, border: "none", minWidth: 100, cursor: "pointer" },
+  reject: { background: "#d32f2f", color: "#fff", padding: 12, borderRadius: 10, border: "none", minWidth: 100, cursor: "pointer" },
   row: { display: "flex", gap: 12, justifyContent: "center", width: "100%" },
-  modal: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,.5)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10,
-  },
+  modal: { position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 },
   modalCard: { background: "#fff", padding: 30, borderRadius: 14, textAlign: "center" },
-  primary: {
-    padding: "10px 20px",
-    background: "#1976d2",
-    color: "#fff",
-    border: "none",
-    borderRadius: 8,
-    cursor: "pointer",
-  },
-  accept: {
-    background: "#2e7d32",
-    color: "#fff",
-    padding: 12,
-    borderRadius: 10,
-    border: "none",
-    minWidth: 100,
-    cursor: "pointer",
-  },
-  reject: {
-    background: "#d32f2f",
-    color: "#fff",
-    padding: 12,
-    borderRadius: 10,
-    border: "none",
-    minWidth: 100,
-    cursor: "pointer",
-  },
+  primary: { padding: "10px 20px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" },
 };
