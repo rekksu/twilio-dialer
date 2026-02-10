@@ -11,7 +11,7 @@ const Softphone = ({ agentId }) => {
   const fetchToken = async () => {
     try {
       const res = await fetch(
-        `https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken?identity=${encodeURIComponent(agentId)}`
+        `https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken?identity=nzyw7V0euigyqjQaHj2Mn0PizUD2`
       );
       const data = await res.json();
       return data.token;
