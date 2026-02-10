@@ -1,12 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
 
-const TOKEN_URL =
-  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
-const VERIFY_ACCESS_URL =
-  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
-const OUTBOUND_URL =
-  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/outboundCall";
+const TOKEN_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
+const VERIFY_ACCESS_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
+const OUTBOUND_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/outboundCall";
 
 export default function OrbitPhone() {
   const deviceRef = useRef(null);
@@ -27,7 +24,9 @@ export default function OrbitPhone() {
   const fromNumber = params.get("from");
   const toNumber = params.get("to");
 
-  // ---------------- Verify access ----------------
+  const isOutbound = fromNumber && toNumber;
+
+  // ------------------ VERIFY ACCESS ------------------
   useEffect(() => {
     const verify = async () => {
       if (!accessKey) {
@@ -50,99 +49,109 @@ export default function OrbitPhone() {
       }
     };
     verify();
-  }, []);
+  }, [accessKey]);
 
-  // ---------------- Enable audio + Twilio device ----------------
+  // ------------------ ENABLE AUDIO ------------------
   const enableAudio = async () => {
     if (!agentId) return setStatus("❌ No agentId provided");
-
     setAudioEnabled(true);
+
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     stream.getTracks().forEach((t) => t.stop());
     audioRef.current = new Audio();
     audioRef.current.autoplay = true;
 
-    const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
-    const { token } = await res.json();
+    try {
+      const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
+      const { token } = await res.json();
 
-    const device = new Device(token, { enableRingingState: true, closeProtection: true });
-    deviceRef.current = device;
-    device.audio.incoming(audioRef.current);
+      const device = new Device(token, { enableRingingState: true, closeProtection: true });
+      deviceRef.current = device;
+      device.audio.incoming(audioRef.current);
 
-    // Incoming call handler
-    device.on("incoming", (call) => {
-      callRef.current = call;
-      setIncoming(true);
-      setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
+      device.on("incoming", (call) => {
+        callRef.current = call;
+        setIncoming(true);
+        setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
 
-      call.on("disconnect", () => {
-        setIncoming(false);
-        setInCall(false);
-        setMicMuted(false);
-        setStatus("✅ Ready");
+        call.on("disconnect", () => {
+          setIncoming(false);
+          setInCall(false);
+          setMicMuted(false);
+          setStatus("✅ Ready");
+        });
+        call.on("error", console.error);
       });
 
-      call.on("error", console.error);
-    });
-
-    await device.register();
-    setStatus("✅ Ready (standby for calls)");
+      await device.register();
+      setStatus("✅ Ready (standby for calls)");
+    } catch (err) {
+      console.error(err);
+      setStatus("❌ Failed to initialize device");
+    }
   };
 
-  // ---------------- Call handlers ----------------
+  // ------------------ INBOUND CALL HANDLERS ------------------
   const accept = () => {
     callRef.current?.accept();
     setIncoming(false);
     setInCall(true);
     setStatus("✅ Connected");
   };
-
   const reject = () => {
     callRef.current?.reject();
     setIncoming(false);
     setInCall(false);
     setStatus("❌ Call rejected");
   };
-
-  const hangup = () => {
-    callRef.current?.disconnect();
-  };
-
+  const hangup = () => callRef.current?.disconnect();
   const toggleMic = () => {
     if (!callRef.current) return;
     callRef.current.mute(!micMuted);
     setMicMuted(!micMuted);
   };
 
-  // ---------------- Outbound call auto-start ----------------
+  // ------------------ OUTBOUND AUTOMATIC ------------------
   useEffect(() => {
+    if (!authorized || !isOutbound) return;
+
     const startOutbound = async () => {
-      if (!fromNumber || !toNumber) return; // only run if outbound
-      setStatus(`📞 Initiating outbound call to ${toNumber}…`);
+      setStatus(`📞 Making outbound call to ${toNumber}…`);
+      await enableAudio();
 
       try {
         const res = await fetch(OUTBOUND_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fromNumber, toNumber, agentId }),
+          body: JSON.stringify({
+            fromNumber,
+            toNumber,
+            agentId,
+          }),
         });
-        if (!res.ok) throw new Error("Failed to start outbound call");
 
-        setStatus(`📞 Outbound call to ${toNumber} started`);
+        const text = await res.text(); // TwiML XML
+        setStatus(`📞 Outbound call initiated`);
 
-        // Open new tab for agent call UI if needed
-        const win = window.open(window.location.href, "_blank");
+        // Automatically close tab after 1 minute
+        const timer = setTimeout(() => window.close(), 60000);
 
-        // Automatically close tab after 90 seconds
-        setTimeout(() => win?.close(), 90000);
+        // Optional: listen to device connection for faster tab close
+        const checkCall = setInterval(() => {
+          if (callRef.current && callRef.current.status() === "completed") {
+            clearInterval(timer);
+            clearInterval(checkCall);
+            window.close();
+          }
+        }, 1000);
       } catch (err) {
         console.error(err);
         setStatus("❌ Failed to make outbound call");
       }
     };
 
-    if (authChecked && authorized && fromNumber && toNumber) startOutbound();
-  }, [authChecked, authorized, fromNumber, toNumber]);
+    startOutbound();
+  }, [authorized, isOutbound, fromNumber, toNumber, agentId]);
 
   if (!authChecked) return <Screen text="🔐 Verifying access…" />;
   if (!authorized) return <Screen text="🚫 Unauthorized" />;
