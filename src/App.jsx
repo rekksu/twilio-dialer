@@ -20,7 +20,7 @@ export default function OrbitPhone() {
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
 
-  // --- Read URL params
+  // --- URL params
   const params = new URLSearchParams(window.location.search);
   const agentId = params.get("agentId");
   const accessKey = params.get("accessKey");
@@ -62,26 +62,26 @@ export default function OrbitPhone() {
         return;
       }
 
-      // --- Get microphone permission
+      // Get microphone permission
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((t) => t.stop());
 
-      // --- Audio element for incoming audio
+      // Audio element for incoming audio
       audioRef.current = new Audio();
       audioRef.current.autoplay = true;
 
-      // --- Get Twilio token
+      // Get Twilio token
       const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
       const { token } = await res.json();
 
-      // --- Initialize device
+      // Initialize Twilio Device
       const device = new Device(token, { enableRingingState: true, closeProtection: true });
       deviceRef.current = device;
       device.audio.incoming(audioRef.current);
 
-      // --- Incoming calls
+      // Incoming calls
       device.on("incoming", (call) => {
-        callRef.current = call;
+        callRef.current = call; // inbound call is ready immediately
         setIncoming(true);
         setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
 
@@ -104,16 +104,15 @@ export default function OrbitPhone() {
         });
       });
 
-      // --- Register device
+      // Register device
       await device.register();
       setStatus("✅ Ready");
 
-      // --- Auto outbound call
+      // Auto outbound call
       if (isOutbound) {
-        setTimeout(() => makeOutbound(), 200); // ensure device ready
+        setTimeout(() => makeOutbound(), 200);
       } else {
-        // For inbound, show enable audio button
-        setAudioEnabled(false);
+        setAudioEnabled(false); // only show enable audio for inbound
       }
     };
 
@@ -129,17 +128,15 @@ export default function OrbitPhone() {
 
     setStatus(`📞 Calling ${toNumber}…`);
 
-    const call = deviceRef.current.connect({
-      params: {
-        To: toNumber,
-        From: fromNumber,
-      },
+    const call = deviceRef.current.connect({ params: { To: toNumber, From: fromNumber } });
+
+    // 🔹 Only set callRef.current after call is accepted/connected
+    call.on("accept", () => {
+      callRef.current = call; // now mic & hangup will work
+      setInCall(true);
+      setStatus("✅ Connected");
     });
 
-    callRef.current = call;
-    setInCall(true);
-
-    call.on("accept", () => setStatus("✅ Connected"));
     call.on("disconnect", () => {
       setInCall(false);
       setMicMuted(false);
@@ -147,7 +144,10 @@ export default function OrbitPhone() {
       setStatus("✅ Call ended");
       if (isOutbound) setTimeout(() => window.close(), 1000);
     });
-    call.on("error", (err) => setStatus(`❌ Call error: ${err.message}`));
+
+    call.on("error", (err) => {
+      setStatus(`❌ Call error: ${err.message}`);
+    });
   };
 
   // --- Call controls
@@ -185,7 +185,6 @@ export default function OrbitPhone() {
 
   return (
     <div style={ui.page}>
-      {/* Show enable audio only for inbound */}
       {!audioEnabled && !isOutbound && (
         <div style={ui.modal}>
           <div style={ui.modalCard}>
@@ -223,6 +222,7 @@ export default function OrbitPhone() {
   );
 }
 
+// --- Screen component
 const Screen = ({ text }) => (
   <div style={{ ...ui.page, textAlign: "center" }}>
     <div style={ui.phone}>{text}</div>
@@ -230,35 +230,9 @@ const Screen = ({ text }) => (
 );
 
 const ui = {
-  page: {
-    height: "100vh",
-    width: "100vw",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    background: "#eef1f5",
-  },
-  phone: {
-    minWidth: 360,
-    maxWidth: "90%",
-    background: "#fff",
-    padding: 24,
-    borderRadius: 18,
-    boxShadow: "0 12px 32px rgba(0,0,0,.2)",
-    textAlign: "center",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 12,
-  },
-  badge: {
-    padding: "6px 12px",
-    borderRadius: 20,
-    fontSize: 12,
-    fontWeight: "bold",
-    background: "#e3f2fd",
-    color: "#1976d2",
-  },
+  page: { height: "100vh", width: "100vw", display: "flex", justifyContent: "center", alignItems: "center", background: "#eef1f5" },
+  phone: { minWidth: 360, maxWidth: "90%", background: "#fff", padding: 24, borderRadius: 18, boxShadow: "0 12px 32px rgba(0,0,0,.2)", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 },
+  badge: { padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: "bold", background: "#e3f2fd", color: "#1976d2" },
   status: { margin: "10px 0", fontWeight: "bold" },
   row: { display: "flex", gap: 12, justifyContent: "center", width: "100%" },
   modal: { position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 },
