@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
 
-const TOKEN_URL =
-  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
+const TOKEN_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
+const VERIFY_ACCESS_URL = "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
 
 export default function InboundPhone() {
   const deviceRef = useRef(null);
@@ -13,61 +13,77 @@ export default function InboundPhone() {
   const [incoming, setIncoming] = useState(false);
   const [inCall, setInCall] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
+  const [authorized, setAuthorized] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
 
-  // ✅ Read agentId from URL
   const params = new URLSearchParams(window.location.search);
-  const agentId = params.get("agentId"); // e.g., /app_users/nzyw7V0euigyqjQaHj2Mn0PizUD2
+  const agentId = params.get("agentId");
+  const accessKey = params.get("accessKey");
 
-  // ================= ENABLE AUDIO & INIT DEVICE =================
+  // ✅ Verify access
+  useEffect(() => {
+    const verify = async () => {
+      if (!accessKey) {
+        setAuthorized(false);
+        setAuthChecked(true);
+        return;
+      }
+      try {
+        const res = await fetch(VERIFY_ACCESS_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: accessKey }),
+        });
+        if (!res.ok) throw new Error("Unauthorized");
+        setAuthorized(true);
+      } catch (err) {
+        console.error(err);
+        setAuthorized(false);
+      } finally {
+        setAuthChecked(true);
+      }
+    };
+    verify();
+  }, []);
+
   const enableAudio = async () => {
-    if (!agentId) {
-      setStatus("❌ No agentId provided in URL");
-      return;
-    }
+    if (!agentId) return setStatus("❌ No agentId provided");
 
     setAudioEnabled(true);
 
-    try {
-      // Get microphone permission
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((t) => t.stop());
 
-      audioRef.current = new Audio();
-      audioRef.current.autoplay = true;
+    audioRef.current = new Audio();
+    audioRef.current.autoplay = true;
 
-      // Use full identity as-is
-      const identity = agentId;
-      const res = await fetch(`${TOKEN_URL}?identity=${encodeURIComponent(identity)}`);
-      const { token } = await res.json();
+    const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
+    const { token } = await res.json();
 
-      // Initialize Twilio Device
-      const device = new Device(token, { enableRingingState: true, closeProtection: true });
-      deviceRef.current = device;
-      device.audio.incoming(audioRef.current);
+    const device = new Device(token, { enableRingingState: true, closeProtection: true });
+    deviceRef.current = device;
+    device.audio.incoming(audioRef.current);
 
-      // Listen for incoming calls
-      device.on("incoming", (call) => {
-        callRef.current = call;
-        setIncoming(true);
-        setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
+    device.on("incoming", (call) => {
+      callRef.current = call;
+      setIncoming(true);
+      setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
 
-        call.on("disconnect", () => {
-          setIncoming(false);
-          setInCall(false);
-          setStatus("✅ Ready");
-        });
-        call.on("error", (err) => console.error(err));
+      call.on("disconnect", () => {
+        setIncoming(false);
+        setInCall(false);
+        setMicMuted(false);
+        setStatus("✅ Ready");
       });
 
-      await device.register();
-      setStatus("✅ Ready (standby for incoming calls)");
-    } catch (err) {
-      console.error(err);
-      setStatus("❌ Error initializing device");
-    }
+      call.on("error", (err) => console.error(err));
+    });
+
+    await device.register();
+    setStatus("✅ Ready (standby for incoming calls)");
   };
 
-  // ================= CALL HANDLERS =================
   const accept = () => {
     callRef.current?.accept();
     setIncoming(false);
@@ -82,11 +98,17 @@ export default function InboundPhone() {
     setStatus("❌ Call rejected");
   };
 
-  const hangup = () => {
-    callRef.current?.disconnect();
+  const hangup = () => callRef.current?.disconnect();
+  const toggleMic = () => {
+    if (!callRef.current) return;
+    const next = !micMuted;
+    callRef.current.mute(next);
+    setMicMuted(next);
   };
 
-  // ================= UI =================
+  if (!authChecked) return <Screen text="🔐 Verifying access…" />;
+  if (!authorized) return <Screen text="🚫 Unauthorized" />;
+
   return (
     <div style={ui.page}>
       {!audioEnabled && (
@@ -107,20 +129,17 @@ export default function InboundPhone() {
 
         {incoming && (
           <div style={ui.row}>
-            <button style={ui.accept} onClick={accept}>
-              Accept
-            </button>
-            <button style={ui.reject} onClick={reject}>
-              Reject
-            </button>
+            <button style={ui.accept} onClick={accept}>Accept</button>
+            <button style={ui.reject} onClick={reject}>Reject</button>
           </div>
         )}
 
         {inCall && (
           <div style={ui.row}>
-            <button style={ui.reject} onClick={hangup}>
-              Hang Up
+            <button style={micMuted ? ui.reject : ui.accept} onClick={toggleMic}>
+              {micMuted ? "Mic Off" : "Mic On"}
             </button>
+            <button style={ui.reject} onClick={hangup}>Hang Up</button>
           </div>
         )}
       </div>
@@ -128,40 +147,14 @@ export default function InboundPhone() {
   );
 }
 
-/* ================= STYLES ================= */
+const Screen = ({ text }) => <div style={{ ...ui.page, textAlign: "center" }}><div style={ui.phone}>{text}</div></div>;
+
 const ui = {
-  page: {
-    height: "100vh",
-    width: "100vw",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    background: "#eef1f5",
-  },
-  phone: {
-    minWidth: 360,
-    maxWidth: "90%",
-    background: "#fff",
-    padding: 24,
-    borderRadius: 18,
-    boxShadow: "0 12px 32px rgba(0,0,0,.2)",
-    textAlign: "center",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 12,
-  },
+  page: { height: "100vh", width: "100vw", display: "flex", justifyContent: "center", alignItems: "center", background: "#eef1f5" },
+  phone: { minWidth: 360, maxWidth: "90%", background: "#fff", padding: 24, borderRadius: 18, boxShadow: "0 12px 32px rgba(0,0,0,.2)", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 },
   status: { margin: "10px 0", fontWeight: "bold" },
   row: { display: "flex", gap: 12, justifyContent: "center", width: "100%" },
-  modal: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,.5)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10,
-  },
+  modal: { position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 },
   modalCard: { background: "#fff", padding: 30, borderRadius: 14, textAlign: "center" },
   primary: { padding: "10px 20px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" },
   accept: { background: "#2e7d32", color: "#fff", padding: 12, borderRadius: 10, border: "none", minWidth: 100, cursor: "pointer" },
