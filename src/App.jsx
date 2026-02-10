@@ -54,66 +54,73 @@ export default function OrbitPhone() {
     verify();
   }, [accessKey]);
 
-  // --- Enable audio + init Twilio Device
-  const enableAudio = async () => {
-    if (!agentId) return setStatus("❌ No agentId provided");
+  // --- Initialize Device
+  useEffect(() => {
+    const initDevice = async () => {
+      if (!agentId) {
+        setStatus("❌ No agentId provided");
+        return;
+      }
 
-    setAudioEnabled(true);
+      // --- Get microphone permission
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
 
-    // 1️⃣ Get microphone permission
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach((t) => t.stop());
+      // --- Audio element for incoming audio
+      audioRef.current = new Audio();
+      audioRef.current.autoplay = true;
 
-    // 2️⃣ Create audio element for incoming audio
-    audioRef.current = new Audio();
-    audioRef.current.autoplay = true;
+      // --- Get Twilio token
+      const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
+      const { token } = await res.json();
 
-    // 3️⃣ Get Twilio token
-    const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
-    const { token } = await res.json();
+      // --- Initialize device
+      const device = new Device(token, { enableRingingState: true, closeProtection: true });
+      deviceRef.current = device;
+      device.audio.incoming(audioRef.current);
 
-    // 4️⃣ Initialize device
-    const device = new Device(token, { enableRingingState: true, closeProtection: true });
-    deviceRef.current = device;
-    device.audio.incoming(audioRef.current);
+      // --- Incoming calls
+      device.on("incoming", (call) => {
+        callRef.current = call;
+        setIncoming(true);
+        setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
 
-    // 5️⃣ Handle incoming calls
-    device.on("incoming", (call) => {
-      callRef.current = call;
-      setIncoming(true);
-      setStatus(`📞 Incoming call from ${call.parameters.From || "Unknown"}`);
+        call.on("accept", () => {
+          setIncoming(false);
+          setInCall(true);
+          setStatus("✅ Connected");
+        });
 
-      call.on("accept", () => {
-        setIncoming(false);
-        setInCall(true);
-        setStatus("✅ Connected");
+        call.on("disconnect", () => {
+          setIncoming(false);
+          setInCall(false);
+          setMicMuted(false);
+          callRef.current = null;
+          setStatus("✅ Ready");
+        });
+
+        call.on("error", (err) => {
+          setStatus(`❌ Call error: ${err.message}`);
+        });
       });
 
-      call.on("disconnect", () => {
-        setIncoming(false);
-        setInCall(false);
-        setMicMuted(false);
-        callRef.current = null;
-        setStatus("✅ Ready");
-      });
+      // --- Register device
+      await device.register();
+      setStatus("✅ Ready");
 
-      call.on("error", (err) => {
-        setStatus(`❌ Call error: ${err.message}`);
-      });
-    });
+      // --- Auto outbound call
+      if (isOutbound) {
+        setTimeout(() => makeOutbound(), 200); // ensure device ready
+      } else {
+        // For inbound, show enable audio button
+        setAudioEnabled(false);
+      }
+    };
 
-    // 6️⃣ Register device and wait for it
-    await device.register();
-    setStatus("✅ Ready");
+    initDevice();
+  }, [agentId, isOutbound]);
 
-    // 7️⃣ Now start outbound call if needed
-    if (isOutbound) {
-      // Small delay ensures the device is fully ready
-      setTimeout(() => makeOutbound(), 200);
-    }
-  };
-
-  // --- Outbound call (browser calls customer directly)
+  // --- Outbound call
   const makeOutbound = () => {
     if (!deviceRef.current) {
       setStatus("❌ Device not ready");
@@ -132,43 +139,32 @@ export default function OrbitPhone() {
     callRef.current = call;
     setInCall(true);
 
-    call.on("accept", () => {
-      setStatus("✅ Connected");
-    });
-
+    call.on("accept", () => setStatus("✅ Connected"));
     call.on("disconnect", () => {
       setInCall(false);
       setMicMuted(false);
       callRef.current = null;
       setStatus("✅ Call ended");
-
-      if (isOutbound) {
-        setTimeout(() => window.close(), 1000);
-      }
+      if (isOutbound) setTimeout(() => window.close(), 1000);
     });
-
-    call.on("error", (err) => {
-      setStatus(`❌ Call error: ${err.message}`);
-    });
+    call.on("error", (err) => setStatus(`❌ Call error: ${err.message}`));
   };
 
   // --- Call controls
   const accept = () => {
-    if (callRef.current) {
-      callRef.current.accept();
-      setIncoming(false);
-      setInCall(true);
-      setStatus("✅ Connected");
-    }
+    if (!callRef.current) return;
+    callRef.current.accept();
+    setIncoming(false);
+    setInCall(true);
+    setStatus("✅ Connected");
   };
 
   const reject = () => {
-    if (callRef.current) {
-      callRef.current.reject();
-      setIncoming(false);
-      setInCall(false);
-      setStatus("❌ Call rejected");
-    }
+    if (!callRef.current) return;
+    callRef.current.reject();
+    setIncoming(false);
+    setInCall(false);
+    setStatus("❌ Call rejected");
   };
 
   const hangup = () => {
@@ -189,12 +185,13 @@ export default function OrbitPhone() {
 
   return (
     <div style={ui.page}>
-      {!audioEnabled && (
+      {/* Show enable audio only for inbound */}
+      {!audioEnabled && !isOutbound && (
         <div style={ui.modal}>
           <div style={ui.modalCard}>
             <h3>Enable Audio</h3>
-            <p>Allow microphone access to {isOutbound ? "make" : "receive"} calls.</p>
-            <button style={ui.primary} onClick={enableAudio}>
+            <p>Allow microphone access to receive calls.</p>
+            <button style={ui.primary} onClick={() => setAudioEnabled(true)}>
               Enable
             </button>
           </div>
@@ -208,12 +205,8 @@ export default function OrbitPhone() {
 
         {incoming && (
           <div style={ui.row}>
-            <button style={ui.accept} onClick={accept}>
-              Accept
-            </button>
-            <button style={ui.reject} onClick={reject}>
-              Reject
-            </button>
+            <button style={ui.accept} onClick={accept}>Accept</button>
+            <button style={ui.reject} onClick={reject}>Reject</button>
           </div>
         )}
 
@@ -222,9 +215,7 @@ export default function OrbitPhone() {
             <button style={micMuted ? ui.reject : ui.accept} onClick={toggleMic}>
               {micMuted ? "Mic Off" : "Mic On"}
             </button>
-            <button style={ui.reject} onClick={hangup}>
-              Hang Up
-            </button>
+            <button style={ui.reject} onClick={hangup}>Hang Up</button>
           </div>
         )}
       </div>
@@ -232,14 +223,12 @@ export default function OrbitPhone() {
   );
 }
 
-// --- Reusable screen component
 const Screen = ({ text }) => (
   <div style={{ ...ui.page, textAlign: "center" }}>
     <div style={ui.phone}>{text}</div>
   </div>
 );
 
-// --- UI Styles
 const ui = {
   page: {
     height: "100vh",
@@ -270,55 +259,11 @@ const ui = {
     background: "#e3f2fd",
     color: "#1976d2",
   },
-  status: {
-    margin: "10px 0",
-    fontWeight: "bold",
-  },
-  row: {
-    display: "flex",
-    gap: 12,
-    justifyContent: "center",
-    width: "100%",
-  },
-  modal: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,.5)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10,
-  },
-  modalCard: {
-    background: "#fff",
-    padding: 30,
-    borderRadius: 14,
-    textAlign: "center",
-  },
-  primary: {
-    padding: "10px 20px",
-    background: "#1976d2",
-    color: "#fff",
-    border: "none",
-    borderRadius: 8,
-    cursor: "pointer",
-  },
-  accept: {
-    background: "#2e7d32",
-    color: "#fff",
-    padding: 12,
-    borderRadius: 10,
-    border: "none",
-    minWidth: 100,
-    cursor: "pointer",
-  },
-  reject: {
-    background: "#d32f2f",
-    color: "#fff",
-    padding: 12,
-    borderRadius: 10,
-    border: "none",
-    minWidth: 100,
-    cursor: "pointer",
-  },
+  status: { margin: "10px 0", fontWeight: "bold" },
+  row: { display: "flex", gap: 12, justifyContent: "center", width: "100%" },
+  modal: { position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 },
+  modalCard: { background: "#fff", padding: 30, borderRadius: 14, textAlign: "center" },
+  primary: { padding: "10px 20px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" },
+  accept: { background: "#2e7d32", color: "#fff", padding: 12, borderRadius: 10, border: "none", minWidth: 100, cursor: "pointer" },
+  reject: { background: "#d32f2f", color: "#fff", padding: 12, borderRadius: 10, border: "none", minWidth: 100, cursor: "pointer" },
 };
