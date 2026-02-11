@@ -11,14 +11,12 @@ export default function OrbitPhone() {
   const deviceRef = useRef(null);
   const callRef = useRef(null);
   const audioRef = useRef(null);
-  const holdMusicRef = useRef(null);
 
   const [status, setStatus] = useState("Initializing…");
   const [incoming, setIncoming] = useState(false);
   const [inCall, setInCall] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
-  const [onHold, setOnHold] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [dialNumber, setDialNumber] = useState("");
@@ -96,12 +94,6 @@ export default function OrbitPhone() {
         audioRef.current = new Audio();
         audioRef.current.autoplay = true;
 
-        // Hold music audio element
-        holdMusicRef.current = new Audio();
-        holdMusicRef.current.loop = true;
-        // Using a royalty-free hold music URL (you can replace with your own)
-        holdMusicRef.current.src = "https://assets.mixkit.co/music/preview/mixkit-tech-house-vibes-130.mp3";
-
         // Get Twilio token
         const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
         const { token } = await res.json();
@@ -131,16 +123,9 @@ export default function OrbitPhone() {
             setIncoming(false);
             setInCall(false);
             setMicMuted(false);
-            setOnHold(false);
             callRef.current = null;
             setStatus("Ready");
             setDialNumber("");
-            
-            // Stop hold music if playing
-            if (holdMusicRef.current) {
-              holdMusicRef.current.pause();
-              holdMusicRef.current.currentTime = 0;
-            }
           });
 
           call.on("error", (err) => {
@@ -211,18 +196,10 @@ export default function OrbitPhone() {
       call.on("disconnect", () => {
         setInCall(false);
         setMicMuted(false);
-        setOnHold(false);
         callRef.current = null;
         setStatus("Call ended");
         setDialNumber("");
         setShowDialpad(true);
-        
-        // Stop hold music if playing
-        if (holdMusicRef.current) {
-          holdMusicRef.current.pause();
-          holdMusicRef.current.currentTime = 0;
-        }
-        
         if (isOutbound) setTimeout(() => window.close(), 1000);
       });
 
@@ -261,52 +238,12 @@ export default function OrbitPhone() {
     callRef.current.disconnect();
     setInCall(false);
     setMicMuted(false);
-    setOnHold(false);
-    
-    // Stop hold music if playing
-    if (holdMusicRef.current) {
-      holdMusicRef.current.pause();
-      holdMusicRef.current.currentTime = 0;
-    }
   };
 
   const toggleMic = () => {
     if (!callRef.current) return;
     callRef.current.mute(!micMuted);
     setMicMuted(!micMuted);
-  };
-
-  const toggleHold = async () => {
-    if (!callRef.current) return;
-
-    const newHoldState = !onHold;
-    setOnHold(newHoldState);
-
-    if (newHoldState) {
-      // Put call on hold
-      // Mute microphone so other party doesn't hear us
-      callRef.current.mute(true);
-      setMicMuted(true);
-      
-      // Play hold music locally (optional - for user feedback)
-      if (holdMusicRef.current) {
-        holdMusicRef.current.volume = 0.3;
-        holdMusicRef.current.play().catch(err => console.log("Hold music error:", err));
-      }
-      
-      setStatus("Call on hold");
-    } else {
-      // Resume call
-      callRef.current.mute(micMuted); // Restore previous mute state
-      
-      // Stop hold music
-      if (holdMusicRef.current) {
-        holdMusicRef.current.pause();
-        holdMusicRef.current.currentTime = 0;
-      }
-      
-      setStatus("Connected");
-    }
   };
 
   if (!authChecked)
@@ -401,17 +338,9 @@ export default function OrbitPhone() {
                   {micMuted ? "Unmute" : "Mute"}
                 </span>
               </button>
-              <button
-                style={{
-                  ...styles.controlBtn,
-                  ...(onHold ? styles.controlBtnActive : {}),
-                }}
-                onClick={toggleHold}
-              >
-                <span style={styles.controlIcon}>{onHold ? "▶️" : "⏸"}</span>
-                <span style={styles.controlLabel}>
-                  {onHold ? "Resume" : "Hold"}
-                </span>
+              <button style={styles.controlBtn}>
+                <span style={styles.controlIcon}>👤</span>
+                <span style={styles.controlLabel}>Hold</span>
               </button>
             </div>
             <button style={styles.hangupBtn} onClick={hangup}>
