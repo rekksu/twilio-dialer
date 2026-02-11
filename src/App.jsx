@@ -136,14 +136,13 @@ export default function OrbitPhone() {
         await device.register();
         setStatus("Ready");
 
-        // Auto outbound call or enable audio
+        // Auto outbound call or wait for inbound
         if (isOutbound) {
           setAudioEnabled(true);
           setPhoneNumber(toNumber);
           setTimeout(() => makeOutbound(toNumber), 200);
-        } else {
-          setAudioEnabled(true); // Auto-enable for inbound
         }
+        // For inbound, don't auto-enable - let user enable to hear ringing
       } catch (err) {
         setStatus(`Setup failed: ${err.message}`);
       }
@@ -270,6 +269,29 @@ export default function OrbitPhone() {
 
   return (
     <div style={styles.page}>
+      {/* Audio Enable Modal - Only for inbound mode */}
+      {!audioEnabled && !isOutbound && (
+        <div style={styles.modal}>
+          <div style={styles.modalCard}>
+            <div style={styles.modalIcon}>
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#667eea" strokeWidth="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+              </svg>
+            </div>
+            <h3 style={styles.modalTitle}>Enable Audio</h3>
+            <p style={styles.modalText}>
+              Allow audio access to hear incoming calls and communicate clearly.
+            </p>
+            <button style={styles.primaryBtn} onClick={() => setAudioEnabled(true)}>
+              Enable Audio
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={styles.phone}>
         {/* Header */}
         <div style={styles.header}>
@@ -729,6 +751,57 @@ const styles = {
   errorText: {
     fontSize: 15,
     color: "#64748b",
+  },
+  // Modal styles
+  modal: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.5)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1000,
+    backdropFilter: "blur(8px)",
+  },
+  modalCard: {
+    background: "#fff",
+    padding: "48px 40px",
+    borderRadius: 24,
+    textAlign: "center",
+    maxWidth: 360,
+    margin: "0 20px",
+    boxShadow: "0 25px 80px rgba(0,0,0,0.3)",
+  },
+  modalIcon: {
+    marginBottom: 24,
+    display: "flex",
+    justifyContent: "center",
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 600,
+    marginBottom: 12,
+    color: "#1e293b",
+    letterSpacing: "-0.3px",
+  },
+  modalText: {
+    fontSize: 15,
+    color: "#64748b",
+    marginBottom: 32,
+    lineHeight: 1.6,
+  },
+  primaryBtn: {
+    width: "100%",
+    padding: "16px 24px",
+    background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+    color: "#fff",
+    border: "none",
+    borderRadius: 16,
+    fontSize: 16,
+    fontWeight: 600,
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+    boxShadow: "0 8px 20px rgba(102, 126, 234, 0.3)",
   },
 };
 
