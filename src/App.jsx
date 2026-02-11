@@ -120,7 +120,7 @@ export default function OrbitPhone() {
   }, [agentId, isOutbound]);
 
   // --- Outbound call
-  const makeOutbound = () => {
+  const makeOutbound = async () => {
     if (!deviceRef.current) {
       setStatus("❌ Device not ready");
       return;
@@ -128,29 +128,34 @@ export default function OrbitPhone() {
 
     setStatus(`📞 Calling ${toNumber}…`);
 
-    // Start the outbound call
-    const call = deviceRef.current.connect({ params: { To: toNumber, From: fromNumber } });
+    try {
+      // Start the outbound call and await the Call object
+      const call = await deviceRef.current.connect({ params: { To: toNumber, From: fromNumber } });
 
-    // 🔹 Store call reference IMMEDIATELY so mic/hangup controls work right away
-    callRef.current = call;
-    
-    // 🔹 Immediately show mic/hangup UI
-    setInCall(true);
+      // 🔹 Store call reference IMMEDIATELY so mic/hangup controls work right away
+      callRef.current = call;
+      
+      // 🔹 Immediately show mic/hangup UI
+      setInCall(true);
 
-    // 🔹 Attach events
-    call.on("accept", () => {
-      setStatus("✅ Connected");
-    });
+      // 🔹 Attach events
+      call.on("accept", () => {
+        setStatus("✅ Connected");
+      });
 
-    call.on("disconnect", () => {
+      call.on("disconnect", () => {
+        setInCall(false);
+        setMicMuted(false);
+        callRef.current = null;
+        setStatus("✅ Call ended");
+        if (isOutbound) setTimeout(() => window.close(), 1000);
+      });
+
+      call.on("error", (err) => setStatus(`❌ Call error: ${err.message}`));
+    } catch (err) {
+      setStatus(`❌ Connection failed: ${err.message}`);
       setInCall(false);
-      setMicMuted(false);
-      callRef.current = null;
-      setStatus("✅ Call ended");
-      if (isOutbound) setTimeout(() => window.close(), 1000);
-    });
-
-    call.on("error", (err) => setStatus(`❌ Call error: ${err.message}`));
+    }
   };
 
   // --- Call controls
