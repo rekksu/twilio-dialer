@@ -19,8 +19,9 @@ export default function OrbitPhone() {
   const [micMuted, setMicMuted] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
+  const [dialNumber, setDialNumber] = useState("");
   const [callDuration, setCallDuration] = useState(0);
-  const [callerNumber, setCallerNumber] = useState("");
+  const [showDialpad, setShowDialpad] = useState(true);
 
   // --- URL params
   const params = new URLSearchParams(window.location.search);
@@ -109,7 +110,7 @@ export default function OrbitPhone() {
         device.on("incoming", (call) => {
           callRef.current = call;
           setIncoming(true);
-          setCallerNumber(call.parameters.From || "Unknown");
+          setDialNumber(call.parameters.From || "Unknown");
           setStatus("Incoming call...");
 
           call.on("accept", () => {
@@ -124,7 +125,7 @@ export default function OrbitPhone() {
             setMicMuted(false);
             callRef.current = null;
             setStatus("Ready");
-            setCallerNumber("");
+            setDialNumber("");
           });
 
           call.on("error", (err) => {
@@ -138,8 +139,8 @@ export default function OrbitPhone() {
 
         // Auto outbound call
         if (isOutbound) {
-          setCallerNumber(toNumber);
-          setTimeout(() => makeOutbound(), 200);
+          setDialNumber(toNumber);
+          setTimeout(() => makeOutbound(toNumber), 200);
         } else {
           setAudioEnabled(false);
         }
@@ -151,18 +152,38 @@ export default function OrbitPhone() {
     initDevice();
   }, [agentId, isOutbound]);
 
+  // --- Dialpad handler
+  const handleDialpadClick = (digit) => {
+    setDialNumber((prev) => prev + digit);
+    
+    // Send DTMF if in call
+    if (inCall && callRef.current) {
+      callRef.current.sendDigits(digit);
+    }
+  };
+
+  const handleBackspace = () => {
+    setDialNumber((prev) => prev.slice(0, -1));
+  };
+
   // --- Outbound call
-  const makeOutbound = async () => {
+  const makeOutbound = async (number = dialNumber) => {
     if (!deviceRef.current) {
       setStatus("Device not ready");
       return;
     }
 
-    setStatus(`Calling ${toNumber}...`);
+    if (!number) {
+      setStatus("Enter a number");
+      return;
+    }
+
+    setStatus(`Calling ${number}...`);
+    setShowDialpad(false);
 
     try {
       const call = await deviceRef.current.connect({
-        params: { To: toNumber, From: fromNumber },
+        params: { To: number, From: fromNumber || "+1234567890" },
       });
 
       callRef.current = call;
@@ -177,17 +198,20 @@ export default function OrbitPhone() {
         setMicMuted(false);
         callRef.current = null;
         setStatus("Call ended");
-        setCallerNumber("");
+        setDialNumber("");
+        setShowDialpad(true);
         if (isOutbound) setTimeout(() => window.close(), 1000);
       });
 
       call.on("error", (err) => {
         setStatus(`Call failed: ${err.message}`);
         setInCall(false);
+        setShowDialpad(true);
       });
     } catch (err) {
       setStatus(`Connection failed: ${err.message}`);
       setInCall(false);
+      setShowDialpad(true);
     }
   };
 
@@ -206,7 +230,7 @@ export default function OrbitPhone() {
     setIncoming(false);
     setInCall(false);
     setStatus("Call rejected");
-    setCallerNumber("");
+    setDialNumber("");
   };
 
   const hangup = () => {
@@ -265,7 +289,7 @@ export default function OrbitPhone() {
         {/* Display Area */}
         <div style={styles.display}>
           <div style={styles.numberDisplay}>
-            {callerNumber || (isOutbound ? toNumber : "Ready")}
+            {dialNumber || (isOutbound ? "" : "Enter number")}
           </div>
           <div style={styles.statusDisplay}>{status}</div>
           {inCall && <div style={styles.duration}>{formatDuration(callDuration)}</div>}
@@ -277,7 +301,6 @@ export default function OrbitPhone() {
             <div style={styles.callerInfo}>
               <div style={styles.avatar}>📞</div>
               <div style={styles.callerName}>Incoming Call</div>
-              <div style={styles.callerNumber}>{callerNumber}</div>
             </div>
             <div style={styles.actionRow}>
               <button style={styles.rejectBtn} onClick={reject}>
@@ -297,6 +320,13 @@ export default function OrbitPhone() {
           <div style={styles.callControls}>
             <div style={styles.controlsGrid}>
               <button
+                style={styles.controlBtn}
+                onClick={() => setShowDialpad(!showDialpad)}
+              >
+                <span style={styles.controlIcon}>⊞</span>
+                <span style={styles.controlLabel}>Keypad</span>
+              </button>
+              <button
                 style={{
                   ...styles.controlBtn,
                   ...(micMuted ? styles.controlBtnActive : {}),
@@ -309,28 +339,79 @@ export default function OrbitPhone() {
                 </span>
               </button>
               <button style={styles.controlBtn}>
-                <span style={styles.controlIcon}>🔊</span>
-                <span style={styles.controlLabel}>Speaker</span>
-              </button>
-              <button style={styles.controlBtn}>
-                <span style={styles.controlIcon}>⏸</span>
+                <span style={styles.controlIcon}>👤</span>
                 <span style={styles.controlLabel}>Hold</span>
               </button>
             </div>
             <button style={styles.hangupBtn} onClick={hangup}>
               <span style={styles.hangupIcon}>✕</span>
-              <span style={styles.hangupText}>End Call</span>
             </button>
           </div>
         )}
 
-        {/* Idle State (not in call, no incoming) */}
+        {/* Dialpad */}
+        {showDialpad && !incoming && !inCall && (
+          <div style={styles.dialpad}>
+            {[
+              ["1", "2", "3"],
+              ["4", "5", "6"],
+              ["7", "8", "9"],
+              ["*", "0", "#"],
+            ].map((row, i) => (
+              <div key={i} style={styles.dialpadRow}>
+                {row.map((digit) => (
+                  <button
+                    key={digit}
+                    style={styles.dialpadBtn}
+                    onClick={() => handleDialpadClick(digit)}
+                  >
+                    {digit}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Dialpad during call */}
+        {showDialpad && inCall && (
+          <div style={styles.dialpad}>
+            {[
+              ["1", "2", "3"],
+              ["4", "5", "6"],
+              ["7", "8", "9"],
+              ["*", "0", "#"],
+            ].map((row, i) => (
+              <div key={i} style={styles.dialpadRow}>
+                {row.map((digit) => (
+                  <button
+                    key={digit}
+                    style={styles.dialpadBtn}
+                    onClick={() => handleDialpadClick(digit)}
+                  >
+                    {digit}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Call Button (when not in call) */}
         {!inCall && !incoming && (
-          <div style={styles.idleContainer}>
-            <div style={styles.idleIcon}>📞</div>
-            <div style={styles.idleText}>
-              {isOutbound ? "Preparing call..." : "Waiting for calls..."}
-            </div>
+          <div style={styles.bottomActions}>
+            {dialNumber && (
+              <button style={styles.backspaceBtn} onClick={handleBackspace}>
+                ⌫
+              </button>
+            )}
+            <button
+              style={styles.callBtn}
+              onClick={() => makeOutbound()}
+              disabled={!dialNumber}
+            >
+              <span style={styles.callIcon}>📞</span>
+            </button>
           </div>
         )}
       </div>
@@ -385,10 +466,10 @@ const styles = {
     fontWeight: 600,
   },
   display: {
-    padding: "32px 20px",
+    padding: "24px 20px",
     background: "#f8fafc",
     textAlign: "center",
-    minHeight: 120,
+    minHeight: 100,
   },
   numberDisplay: {
     fontSize: 28,
@@ -396,7 +477,7 @@ const styles = {
     color: "#1e293b",
     marginBottom: 8,
     minHeight: 36,
-    letterSpacing: 0.5,
+    letterSpacing: 1,
   },
   statusDisplay: {
     fontSize: 14,
@@ -404,18 +485,18 @@ const styles = {
     marginBottom: 4,
   },
   duration: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 600,
     color: "#667eea",
-    marginTop: 12,
+    marginTop: 8,
   },
   incomingContainer: {
-    padding: "40px 20px",
+    padding: "32px 20px",
     background: "#fff",
   },
   callerInfo: {
     textAlign: "center",
-    marginBottom: 40,
+    marginBottom: 32,
   },
   avatar: {
     width: 80,
@@ -427,17 +508,11 @@ const styles = {
     justifyContent: "center",
     fontSize: 36,
     margin: "0 auto 16px",
-    boxShadow: "0 8px 16px rgba(102, 126, 234, 0.3)",
   },
   callerName: {
     fontSize: 20,
     fontWeight: 600,
     color: "#1e293b",
-    marginBottom: 8,
-  },
-  callerNumber: {
-    fontSize: 16,
-    color: "#64748b",
   },
   actionRow: {
     display: "flex",
@@ -484,7 +559,7 @@ const styles = {
     fontSize: 20,
   },
   callControls: {
-    padding: "32px 20px 40px",
+    padding: "24px 20px",
     background: "#fff",
   },
   controlsGrid: {
@@ -494,7 +569,7 @@ const styles = {
     marginBottom: 24,
   },
   controlBtn: {
-    padding: "20px 8px",
+    padding: "16px 8px",
     background: "#f1f5f9",
     border: "none",
     borderRadius: 16,
@@ -507,9 +582,10 @@ const styles = {
   },
   controlBtnActive: {
     background: "#667eea",
+    color: "#fff",
   },
   controlIcon: {
-    fontSize: 28,
+    fontSize: 24,
   },
   controlLabel: {
     fontSize: 12,
@@ -523,35 +599,76 @@ const styles = {
     color: "#fff",
     border: "none",
     borderRadius: 50,
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 600,
     cursor: "pointer",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    gap: 8,
     boxShadow: "0 4px 12px rgba(239, 68, 68, 0.3)",
   },
   hangupIcon: {
-    fontSize: 20,
+    fontSize: 24,
   },
-  hangupText: {
-    fontSize: 16,
-  },
-  idleContainer: {
-    padding: "60px 20px",
-    textAlign: "center",
+  dialpad: {
+    padding: "16px 20px 24px",
     background: "#fff",
   },
-  idleIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-    opacity: 0.3,
+  dialpadRow: {
+    display: "flex",
+    gap: 12,
+    marginBottom: 12,
   },
-  idleText: {
-    fontSize: 16,
-    color: "#94a3b8",
+  dialpadBtn: {
+    flex: 1,
+    height: 64,
+    background: "#f1f5f9",
+    border: "none",
+    borderRadius: 16,
+    fontSize: 24,
     fontWeight: 500,
+    color: "#1e293b",
+    cursor: "pointer",
+    transition: "all 0.15s",
+    boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+  },
+  bottomActions: {
+    padding: "16px 20px 24px",
+    background: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+  },
+  backspaceBtn: {
+    width: 56,
+    height: 56,
+    background: "#f1f5f9",
+    border: "none",
+    borderRadius: "50%",
+    fontSize: 20,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    transition: "all 0.2s",
+  },
+  callBtn: {
+    width: 64,
+    height: 64,
+    background: "#10b981",
+    border: "none",
+    borderRadius: "50%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
+    transition: "all 0.2s",
+  },
+  callIcon: {
+    fontSize: 28,
   },
   modal: {
     position: "fixed",
