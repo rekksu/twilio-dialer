@@ -19,8 +19,9 @@ export default function OrbitPhone() {
   const [micMuted, setMicMuted] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
-  const [phoneNumber, setPhoneNumber] = useState("");
+  const [dialNumber, setDialNumber] = useState("");
   const [callDuration, setCallDuration] = useState(0);
+  const [showDialpad, setShowDialpad] = useState(true);
 
   // --- URL params
   const params = new URLSearchParams(window.location.search);
@@ -109,7 +110,7 @@ export default function OrbitPhone() {
         device.on("incoming", (call) => {
           callRef.current = call;
           setIncoming(true);
-          setPhoneNumber(call.parameters.From || "Unknown");
+          setDialNumber(call.parameters.From || "Unknown");
           setStatus("Incoming call...");
 
           call.on("accept", () => {
@@ -124,7 +125,7 @@ export default function OrbitPhone() {
             setMicMuted(false);
             callRef.current = null;
             setStatus("Ready");
-            setPhoneNumber("");
+            setDialNumber("");
           });
 
           call.on("error", (err) => {
@@ -136,13 +137,13 @@ export default function OrbitPhone() {
         await device.register();
         setStatus("Ready");
 
-        // Auto outbound call or wait for inbound
+        // Auto outbound call
         if (isOutbound) {
-          setAudioEnabled(true);
-          setPhoneNumber(toNumber);
+          setDialNumber(toNumber);
           setTimeout(() => makeOutbound(toNumber), 200);
+        } else {
+          setAudioEnabled(false);
         }
-        // For inbound, don't auto-enable - let user enable to hear ringing
       } catch (err) {
         setStatus(`Setup failed: ${err.message}`);
       }
@@ -151,8 +152,22 @@ export default function OrbitPhone() {
     initDevice();
   }, [agentId, isOutbound]);
 
+  // --- Dialpad handler
+  const handleDialpadClick = (digit) => {
+    setDialNumber((prev) => prev + digit);
+    
+    // Send DTMF if in call
+    if (inCall && callRef.current) {
+      callRef.current.sendDigits(digit);
+    }
+  };
+
+  const handleBackspace = () => {
+    setDialNumber((prev) => prev.slice(0, -1));
+  };
+
   // --- Outbound call
-  const makeOutbound = async (number = phoneNumber) => {
+  const makeOutbound = async (number = dialNumber) => {
     if (!deviceRef.current) {
       setStatus("Device not ready");
       return;
@@ -164,6 +179,7 @@ export default function OrbitPhone() {
     }
 
     setStatus(`Calling ${number}...`);
+    setShowDialpad(false);
 
     try {
       const call = await deviceRef.current.connect({
@@ -182,17 +198,20 @@ export default function OrbitPhone() {
         setMicMuted(false);
         callRef.current = null;
         setStatus("Call ended");
-        setPhoneNumber("");
+        setDialNumber("");
+        setShowDialpad(true);
         if (isOutbound) setTimeout(() => window.close(), 1000);
       });
 
       call.on("error", (err) => {
         setStatus(`Call failed: ${err.message}`);
         setInCall(false);
+        setShowDialpad(true);
       });
     } catch (err) {
       setStatus(`Connection failed: ${err.message}`);
       setInCall(false);
+      setShowDialpad(true);
     }
   };
 
@@ -211,7 +230,7 @@ export default function OrbitPhone() {
     setIncoming(false);
     setInCall(false);
     setStatus("Call rejected");
-    setPhoneNumber("");
+    setDialNumber("");
   };
 
   const hangup = () => {
@@ -227,63 +246,31 @@ export default function OrbitPhone() {
     setMicMuted(!micMuted);
   };
 
-  // Format phone number for display
-  const formatPhoneNumber = (num) => {
-    if (!num) return "";
-    const cleaned = num.replace(/\D/g, "");
-    if (cleaned.length === 11 && cleaned.startsWith("1")) {
-      return `+1 (${cleaned.slice(1, 4)}) ${cleaned.slice(4, 7)}-${cleaned.slice(7)}`;
-    }
-    if (cleaned.length === 10) {
-      return `(${cleaned.slice(0, 3)}) ${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
-    }
-    return num;
-  };
-
   if (!authChecked)
     return (
       <Screen>
-        <div style={styles.centerContent}>
-          <div style={styles.loader}></div>
-          <p style={styles.statusText}>Verifying access...</p>
-        </div>
+        <div style={styles.loader}></div>
+        <p style={styles.statusText}>Verifying access...</p>
       </Screen>
     );
 
   if (!authorized)
     return (
       <Screen>
-        <div style={styles.centerContent}>
-          <div style={styles.errorIcon}>
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="15" y1="9" x2="9" y2="15"></line>
-              <line x1="9" y1="9" x2="15" y2="15"></line>
-            </svg>
-          </div>
-          <p style={styles.errorTitle}>Unauthorized Access</p>
-          <p style={styles.errorText}>You don't have permission to access this phone.</p>
-        </div>
+        <div style={styles.errorIcon}>🚫</div>
+        <p style={styles.statusText}>Unauthorized Access</p>
       </Screen>
     );
 
   return (
     <div style={styles.page}>
-      {/* Audio Enable Modal - Only for inbound mode */}
       {!audioEnabled && !isOutbound && (
         <div style={styles.modal}>
           <div style={styles.modalCard}>
-            <div style={styles.modalIcon}>
-              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#667eea" strokeWidth="2">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                <line x1="12" y1="19" x2="12" y2="23"></line>
-                <line x1="8" y1="23" x2="16" y2="23"></line>
-              </svg>
-            </div>
-            <h3 style={styles.modalTitle}>Enable Audio</h3>
+            <div style={styles.micIcon}>🎤</div>
+            <h3 style={styles.modalTitle}>Enable Microphone</h3>
             <p style={styles.modalText}>
-              Allow audio access to hear incoming calls and communicate clearly.
+              Allow microphone access to make and receive calls.
             </p>
             <button style={styles.primaryBtn} onClick={() => setAudioEnabled(true)}>
               Enable Audio
@@ -295,136 +282,138 @@ export default function OrbitPhone() {
       <div style={styles.phone}>
         {/* Header */}
         <div style={styles.header}>
-          <div style={styles.headerContent}>
-            <div style={styles.brandContainer}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
-              </svg>
-              <span style={styles.brandText}>Orbit Phone</span>
+          <div style={styles.statusDot}></div>
+          <span style={styles.headerText}>Orbit Phone</span>
+        </div>
+
+        {/* Display Area */}
+        <div style={styles.display}>
+          <div style={styles.numberDisplay}>
+            {dialNumber || (isOutbound ? "" : "Enter number")}
+          </div>
+          <div style={styles.statusDisplay}>{status}</div>
+          {inCall && <div style={styles.duration}>{formatDuration(callDuration)}</div>}
+        </div>
+
+        {/* Incoming Call */}
+        {incoming && (
+          <div style={styles.incomingContainer}>
+            <div style={styles.callerInfo}>
+              <div style={styles.avatar}>📞</div>
+              <div style={styles.callerName}>Incoming Call</div>
             </div>
-            <div style={styles.statusBadge}>
-              <div style={styles.statusDot}></div>
-              <span style={styles.statusLabel}>Online</span>
+            <div style={styles.actionRow}>
+              <button style={styles.rejectBtn} onClick={reject}>
+                <span style={styles.btnIcon}>✕</span>
+                <span>Decline</span>
+              </button>
+              <button style={styles.acceptBtn} onClick={accept}>
+                <span style={styles.btnIcon}>✓</span>
+                <span>Accept</span>
+              </button>
             </div>
           </div>
-        </div>
+        )}
 
-        {/* Main Content */}
-        <div style={styles.content}>
-          {/* Incoming Call */}
-          {incoming && (
-            <div style={styles.incomingContainer}>
-              <div style={styles.callerInfo}>
-                <div style={styles.avatarRing}>
-                  <div style={styles.avatar}>
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                      <circle cx="12" cy="7" r="4"></circle>
-                    </svg>
-                  </div>
-                </div>
-                <div style={styles.callerDetails}>
-                  <div style={styles.callerLabel}>Incoming Call</div>
-                  <div style={styles.callerNumber}>{formatPhoneNumber(phoneNumber)}</div>
-                </div>
-              </div>
-
-              <div style={styles.incomingActions}>
-                <button style={styles.rejectBtn} onClick={reject}>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
-                  </svg>
-                  Decline
-                </button>
-                <button style={styles.acceptBtn} onClick={accept}>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
-                  </svg>
-                  Accept
-                </button>
-              </div>
+        {/* In Call Controls */}
+        {inCall && !incoming && (
+          <div style={styles.callControls}>
+            <div style={styles.controlsGrid}>
+              <button
+                style={styles.controlBtn}
+                onClick={() => setShowDialpad(!showDialpad)}
+              >
+                <span style={styles.controlIcon}>⊞</span>
+                <span style={styles.controlLabel}>Keypad</span>
+              </button>
+              <button
+                style={{
+                  ...styles.controlBtn,
+                  ...(micMuted ? styles.controlBtnActive : {}),
+                }}
+                onClick={toggleMic}
+              >
+                <span style={styles.controlIcon}>{micMuted ? "🔇" : "🎤"}</span>
+                <span style={styles.controlLabel}>
+                  {micMuted ? "Unmute" : "Mute"}
+                </span>
+              </button>
+              <button style={styles.controlBtn}>
+                <span style={styles.controlIcon}>👤</span>
+                <span style={styles.controlLabel}>Hold</span>
+              </button>
             </div>
-          )}
+            <button style={styles.hangupBtn} onClick={hangup}>
+              <span style={styles.hangupIcon}>✕</span>
+            </button>
+          </div>
+        )}
 
-          {/* Active Call */}
-          {inCall && !incoming && (
-            <div style={styles.activeCallContainer}>
-              <div style={styles.activeCallInfo}>
-                <div style={styles.activeAvatar}>
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                    <circle cx="12" cy="7" r="4"></circle>
-                  </svg>
-                </div>
-                <div style={styles.activeCallDetails}>
-                  <div style={styles.activeNumber}>{formatPhoneNumber(phoneNumber)}</div>
-                  <div style={styles.activeStatus}>{status}</div>
-                  <div style={styles.activeDuration}>{formatDuration(callDuration)}</div>
-                </div>
+        {/* Dialpad */}
+        {showDialpad && !incoming && !inCall && (
+          <div style={styles.dialpad}>
+            {[
+              ["1", "2", "3"],
+              ["4", "5", "6"],
+              ["7", "8", "9"],
+              ["*", "0", "#"],
+            ].map((row, i) => (
+              <div key={i} style={styles.dialpadRow}>
+                {row.map((digit) => (
+                  <button
+                    key={digit}
+                    style={styles.dialpadBtn}
+                    onClick={() => handleDialpadClick(digit)}
+                  >
+                    {digit}
+                  </button>
+                ))}
               </div>
+            ))}
+          </div>
+        )}
 
-              <div style={styles.callControls}>
-                <button
-                  style={{
-                    ...styles.controlBtn,
-                    ...(micMuted ? styles.controlBtnActive : {}),
-                  }}
-                  onClick={toggleMic}
-                >
-                  <div style={styles.controlIconContainer}>
-                    {micMuted ? (
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="1" y1="1" x2="23" y2="23"></line>
-                        <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                        <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-                        <line x1="12" y1="19" x2="12" y2="23"></line>
-                        <line x1="8" y1="23" x2="16" y2="23"></line>
-                      </svg>
-                    ) : (
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                        <line x1="12" y1="19" x2="12" y2="23"></line>
-                        <line x1="8" y1="23" x2="16" y2="23"></line>
-                      </svg>
-                    )}
-                  </div>
-                  <span style={styles.controlLabel}>{micMuted ? "Unmute" : "Mute"}</span>
-                </button>
-
-                <button style={styles.hangupBtn} onClick={hangup}>
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
-                  </svg>
-                </button>
-
-                <button style={styles.controlBtn}>
-                  <div style={styles.controlIconContainer}>
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="12" cy="12" r="10"></circle>
-                      <line x1="12" y1="8" x2="12" y2="12"></line>
-                      <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                    </svg>
-                  </div>
-                  <span style={styles.controlLabel}>Hold</span>
-                </button>
+        {/* Dialpad during call */}
+        {showDialpad && inCall && (
+          <div style={styles.dialpad}>
+            {[
+              ["1", "2", "3"],
+              ["4", "5", "6"],
+              ["7", "8", "9"],
+              ["*", "0", "#"],
+            ].map((row, i) => (
+              <div key={i} style={styles.dialpadRow}>
+                {row.map((digit) => (
+                  <button
+                    key={digit}
+                    style={styles.dialpadBtn}
+                    onClick={() => handleDialpadClick(digit)}
+                  >
+                    {digit}
+                  </button>
+                ))}
               </div>
-            </div>
-          )}
+            ))}
+          </div>
+        )}
 
-          {/* Idle State */}
-          {!inCall && !incoming && (
-            <div style={styles.idleContainer}>
-              <div style={styles.idleIcon}>
-                <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="1.5">
-                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
-                </svg>
-              </div>
-              <div style={styles.idleTitle}>Ready for Calls</div>
-              <div style={styles.idleText}>{status}</div>
-            </div>
-          )}
-        </div>
+        {/* Call Button (when not in call) */}
+        {!inCall && !incoming && (
+          <div style={styles.bottomActions}>
+            {dialNumber && (
+              <button style={styles.backspaceBtn} onClick={handleBackspace}>
+                ⌫
+              </button>
+            )}
+            <button
+              style={styles.callBtn}
+              onClick={() => makeOutbound()}
+              disabled={!dialNumber}
+            >
+              <span style={styles.callIcon}>📞</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -439,182 +428,77 @@ const Screen = ({ children }) => (
 
 const styles = {
   page: {
-    minHeight: "100vh",
+    height: "100vh",
     width: "100vw",
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
     background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
-    padding: "20px",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
   },
   phone: {
-    width: 420,
-    maxWidth: "100%",
+    width: 380,
+    maxWidth: "95%",
     background: "#ffffff",
-    borderRadius: 32,
-    boxShadow: "0 25px 80px rgba(0,0,0,0.25), 0 10px 40px rgba(0,0,0,0.15)",
+    borderRadius: 24,
+    boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
     overflow: "hidden",
     display: "flex",
     flexDirection: "column",
   },
   header: {
     background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-    padding: "20px 24px",
-  },
-  headerContent: {
+    padding: "16px 20px",
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
-  },
-  brandContainer: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-  },
-  brandText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: 600,
-    letterSpacing: "-0.2px",
-  },
-  statusBadge: {
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    background: "rgba(255,255,255,0.2)",
-    padding: "6px 12px",
-    borderRadius: 20,
-    backdropFilter: "blur(10px)",
+    gap: 10,
   },
   statusDot: {
-    width: 6,
-    height: 6,
+    width: 8,
+    height: 8,
     borderRadius: "50%",
     background: "#4ade80",
     boxShadow: "0 0 8px #4ade80",
   },
-  statusLabel: {
+  headerText: {
     color: "#fff",
-    fontSize: 12,
+    fontSize: 16,
+    fontWeight: 600,
+  },
+  display: {
+    padding: "24px 20px",
+    background: "#f8fafc",
+    textAlign: "center",
+    minHeight: 100,
+  },
+  numberDisplay: {
+    fontSize: 28,
     fontWeight: 500,
+    color: "#1e293b",
+    marginBottom: 8,
+    minHeight: 36,
+    letterSpacing: 1,
   },
-  content: {
-    minHeight: 500,
-    display: "flex",
-    flexDirection: "column",
+  statusDisplay: {
+    fontSize: 14,
+    color: "#64748b",
+    marginBottom: 4,
   },
-  centerContent: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 60,
+  duration: {
+    fontSize: 16,
+    fontWeight: 600,
+    color: "#667eea",
+    marginTop: 8,
   },
-  // Incoming call styles
   incomingContainer: {
-    padding: "60px 32px",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    flex: 1,
-    justifyContent: "center",
+    padding: "32px 20px",
+    background: "#fff",
   },
   callerInfo: {
     textAlign: "center",
-    marginBottom: 48,
-  },
-  avatarRing: {
-    width: 120,
-    height: 120,
-    borderRadius: "50%",
-    background: "linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    margin: "0 auto 24px",
-    animation: "pulse 2s ease-in-out infinite",
+    marginBottom: 32,
   },
   avatar: {
-    width: 96,
-    height: 96,
-    borderRadius: "50%",
-    background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  callerDetails: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-  },
-  callerLabel: {
-    fontSize: 14,
-    fontWeight: 500,
-    color: "#64748b",
-    textTransform: "uppercase",
-    letterSpacing: "0.5px",
-  },
-  callerNumber: {
-    fontSize: 28,
-    fontWeight: 600,
-    color: "#1e293b",
-    letterSpacing: "-0.5px",
-  },
-  incomingActions: {
-    display: "flex",
-    gap: 20,
-    width: "100%",
-    maxWidth: 340,
-  },
-  acceptBtn: {
-    flex: 1,
-    padding: "18px 24px",
-    background: "#10b981",
-    color: "#fff",
-    border: "none",
-    borderRadius: 16,
-    fontSize: 16,
-    fontWeight: 600,
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    boxShadow: "0 8px 20px rgba(16, 185, 129, 0.3)",
-    transition: "all 0.2s ease",
-  },
-  rejectBtn: {
-    flex: 1,
-    padding: "18px 24px",
-    background: "#ef4444",
-    color: "#fff",
-    border: "none",
-    borderRadius: 16,
-    fontSize: 16,
-    fontWeight: 600,
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    boxShadow: "0 8px 20px rgba(239, 68, 68, 0.3)",
-    transition: "all 0.2s ease",
-  },
-  // Active call styles
-  activeCallContainer: {
-    padding: "48px 32px",
-    display: "flex",
-    flexDirection: "column",
-    flex: 1,
-    justifyContent: "space-between",
-  },
-  activeCallInfo: {
-    textAlign: "center",
-    marginBottom: 40,
-  },
-  activeAvatar: {
     width: 80,
     height: 80,
     borderRadius: "50%",
@@ -622,214 +506,248 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    margin: "0 auto 20px",
-    boxShadow: "0 10px 30px rgba(102, 126, 234, 0.3)",
+    fontSize: 36,
+    margin: "0 auto 16px",
   },
-  activeCallDetails: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-  },
-  activeNumber: {
-    fontSize: 24,
+  callerName: {
+    fontSize: 20,
     fontWeight: 600,
     color: "#1e293b",
-    letterSpacing: "-0.3px",
   },
-  activeStatus: {
-    fontSize: 14,
-    color: "#64748b",
-    fontWeight: 500,
+  actionRow: {
+    display: "flex",
+    gap: 16,
+    justifyContent: "center",
   },
-  activeDuration: {
-    fontSize: 18,
+  acceptBtn: {
+    flex: 1,
+    maxWidth: 140,
+    padding: "16px 24px",
+    background: "#10b981",
+    color: "#fff",
+    border: "none",
+    borderRadius: 50,
+    fontSize: 16,
     fontWeight: 600,
-    color: "#667eea",
-    marginTop: 4,
-  },
-  callControls: {
+    cursor: "pointer",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: 20,
+    gap: 8,
+    boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
+    transition: "all 0.2s",
+  },
+  rejectBtn: {
+    flex: 1,
+    maxWidth: 140,
+    padding: "16px 24px",
+    background: "#ef4444",
+    color: "#fff",
+    border: "none",
+    borderRadius: 50,
+    fontSize: 16,
+    fontWeight: 600,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    boxShadow: "0 4px 12px rgba(239, 68, 68, 0.3)",
+    transition: "all 0.2s",
+  },
+  btnIcon: {
+    fontSize: 20,
+  },
+  callControls: {
+    padding: "24px 20px",
+    background: "#fff",
+  },
+  controlsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: 12,
+    marginBottom: 24,
   },
   controlBtn: {
-    width: 80,
-    padding: "20px 12px",
+    padding: "16px 8px",
     background: "#f1f5f9",
     border: "none",
-    borderRadius: 20,
+    borderRadius: 16,
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
     cursor: "pointer",
-    transition: "all 0.2s ease",
+    transition: "all 0.2s",
   },
   controlBtnActive: {
     background: "#667eea",
     color: "#fff",
   },
-  controlIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: "50%",
-    background: "rgba(255,255,255,0.5)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+  controlIcon: {
+    fontSize: 24,
   },
   controlLabel: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: "#475569",
+    fontSize: 12,
+    fontWeight: 500,
+    color: "#64748b",
   },
   hangupBtn: {
-    width: 80,
-    height: 80,
+    width: "100%",
+    padding: 18,
     background: "#ef4444",
     color: "#fff",
     border: "none",
-    borderRadius: "50%",
+    borderRadius: 50,
+    fontSize: 18,
+    fontWeight: 600,
     cursor: "pointer",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    boxShadow: "0 10px 25px rgba(239, 68, 68, 0.4)",
-    transition: "all 0.2s ease",
+    gap: 8,
+    boxShadow: "0 4px 12px rgba(239, 68, 68, 0.3)",
   },
-  // Idle state styles
-  idleContainer: {
-    padding: "80px 32px",
-    textAlign: "center",
-    flex: 1,
+  hangupIcon: {
+    fontSize: 24,
+  },
+  dialpad: {
+    padding: "16px 20px 24px",
+    background: "#fff",
+  },
+  dialpadRow: {
     display: "flex",
-    flexDirection: "column",
+    gap: 12,
+    marginBottom: 12,
+  },
+  dialpadBtn: {
+    flex: 1,
+    height: 64,
+    background: "#f1f5f9",
+    border: "none",
+    borderRadius: 16,
+    fontSize: 24,
+    fontWeight: 500,
+    color: "#1e293b",
+    cursor: "pointer",
+    transition: "all 0.15s",
+    boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+  },
+  bottomActions: {
+    padding: "16px 20px 24px",
+    background: "#fff",
+    display: "flex",
     alignItems: "center",
     justifyContent: "center",
+    gap: 16,
   },
-  idleIcon: {
-    marginBottom: 24,
-    opacity: 0.6,
-  },
-  idleTitle: {
-    fontSize: 24,
-    fontWeight: 600,
-    color: "#1e293b",
-    marginBottom: 12,
-    letterSpacing: "-0.3px",
-  },
-  idleText: {
-    fontSize: 15,
-    color: "#64748b",
-    fontWeight: 500,
-  },
-  // Loading & Error states
-  loader: {
+  backspaceBtn: {
     width: 56,
     height: 56,
-    border: "4px solid #e2e8f0",
-    borderTop: "4px solid #667eea",
+    background: "#f1f5f9",
+    border: "none",
     borderRadius: "50%",
-    animation: "spin 1s linear infinite",
-    marginBottom: 24,
-  },
-  statusText: {
-    fontSize: 16,
-    color: "#64748b",
-    fontWeight: 500,
-  },
-  errorIcon: {
-    marginBottom: 24,
-  },
-  errorTitle: {
     fontSize: 20,
-    fontWeight: 600,
-    color: "#1e293b",
-    marginBottom: 8,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    transition: "all 0.2s",
   },
-  errorText: {
-    fontSize: 15,
-    color: "#64748b",
+  callBtn: {
+    width: 64,
+    height: 64,
+    background: "#10b981",
+    border: "none",
+    borderRadius: "50%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
+    transition: "all 0.2s",
   },
-  // Modal styles
+  callIcon: {
+    fontSize: 28,
+  },
   modal: {
     position: "fixed",
     inset: 0,
-    background: "rgba(0,0,0,0.5)",
+    background: "rgba(0,0,0,0.6)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     zIndex: 1000,
-    backdropFilter: "blur(8px)",
+    backdropFilter: "blur(4px)",
   },
   modalCard: {
     background: "#fff",
-    padding: "48px 40px",
-    borderRadius: 24,
+    padding: 40,
+    borderRadius: 20,
     textAlign: "center",
-    maxWidth: 360,
-    margin: "0 20px",
-    boxShadow: "0 25px 80px rgba(0,0,0,0.3)",
+    maxWidth: 320,
+    boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
   },
-  modalIcon: {
-    marginBottom: 24,
-    display: "flex",
-    justifyContent: "center",
+  micIcon: {
+    fontSize: 48,
+    marginBottom: 16,
   },
   modalTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 600,
     marginBottom: 12,
     color: "#1e293b",
-    letterSpacing: "-0.3px",
   },
   modalText: {
-    fontSize: 15,
+    fontSize: 14,
     color: "#64748b",
-    marginBottom: 32,
-    lineHeight: 1.6,
+    marginBottom: 24,
+    lineHeight: 1.5,
   },
   primaryBtn: {
     width: "100%",
-    padding: "16px 24px",
+    padding: "14px 24px",
     background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
     color: "#fff",
     border: "none",
-    borderRadius: 16,
+    borderRadius: 12,
     fontSize: 16,
     fontWeight: 600,
     cursor: "pointer",
-    transition: "all 0.2s ease",
-    boxShadow: "0 8px 20px rgba(102, 126, 234, 0.3)",
+    transition: "all 0.2s",
+  },
+  loader: {
+    width: 48,
+    height: 48,
+    border: "4px solid #e2e8f0",
+    borderTop: "4px solid #667eea",
+    borderRadius: "50%",
+    animation: "spin 1s linear infinite",
+    marginBottom: 16,
+  },
+  statusText: {
+    fontSize: 16,
+    color: "#64748b",
+    textAlign: "center",
+  },
+  errorIcon: {
+    fontSize: 64,
+    marginBottom: 16,
   },
 };
 
-// Add CSS animations
+// Add CSS animation
 const styleSheet = document.createElement("style");
 styleSheet.textContent = `
   @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
   }
-  
-  @keyframes pulse {
-    0%, 100% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(1.05); opacity: 0.8; }
-  }
-  
   button:hover {
     transform: translateY(-2px);
-    filter: brightness(1.05);
   }
-  
   button:active {
     transform: translateY(0);
-  }
-  
-  button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 `;
 document.head.appendChild(styleSheet);
