@@ -131,12 +131,14 @@ export default function OrbitPhone() {
     // Start the outbound call
     const call = deviceRef.current.connect({ params: { To: toNumber, From: fromNumber } });
 
+    // 🔹 Store call reference IMMEDIATELY so mic/hangup controls work right away
+    callRef.current = call;
+    
     // 🔹 Immediately show mic/hangup UI
     setInCall(true);
 
     // 🔹 Attach events
     call.on("accept", () => {
-      callRef.current = call; // mic & hangup now fully work
       setStatus("✅ Connected");
     });
 
