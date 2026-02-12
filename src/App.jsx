@@ -6,24 +6,26 @@ const TOKEN_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 const VERIFY_ACCESS_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
-const HOLD_CONTROL_URL =
-  "https://hold-control-2835.twil.io/path_1"; // UPDATE THIS with your Twilio Function URL
+const HOLD_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/holdCall";
+
 
 export default function OrbitPhone() {
   const deviceRef = useRef(null);
   const callRef = useRef(null);
-  const holdMusicRef = useRef(null);
 
   const [status, setStatus] = useState("Initializing…");
   const [incoming, setIncoming] = useState(false);
   const [inCall, setInCall] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
-  const [onHold, setOnHold] = useState(false);
+  const [isOnHold, setIsOnHold] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [callDuration, setCallDuration] = useState(0);
+
+
 
   // --- URL params
   const params = new URLSearchParams(window.location.search);
@@ -125,18 +127,11 @@ export default function OrbitPhone() {
             setIncoming(false);
             setInCall(false);
             setMicMuted(false);
-            setOnHold(false);
             callRef.current = null;
             setStatus("Call ended");
             setPhoneNumber("");
-            
-            // Stop hold music if playing
-            if (holdMusicRef.current) {
-              holdMusicRef.current.pause();
-              holdMusicRef.current.currentTime = 0;
-            }
-            
             setTimeout(() => setStatus("Ready"), 2000);
+            setIsOnHold(false);
           });
 
           // When caller cancels (hangs up during ringing before you answer)
@@ -145,17 +140,9 @@ export default function OrbitPhone() {
             setIncoming(false);
             setInCall(false);
             setMicMuted(false);
-            setOnHold(false);
             callRef.current = null;
             setStatus("Missed call");
             setPhoneNumber("");
-            
-            // Stop hold music if playing
-            if (holdMusicRef.current) {
-              holdMusicRef.current.pause();
-              holdMusicRef.current.currentTime = 0;
-            }
-            
             setTimeout(() => setStatus("Ready"), 2000);
           });
 
@@ -165,17 +152,9 @@ export default function OrbitPhone() {
             setIncoming(false);
             setInCall(false);
             setMicMuted(false);
-            setOnHold(false);
             callRef.current = null;
             setStatus("Call rejected");
             setPhoneNumber("");
-            
-            // Stop hold music if playing
-            if (holdMusicRef.current) {
-              holdMusicRef.current.pause();
-              holdMusicRef.current.currentTime = 0;
-            }
-            
             setTimeout(() => setStatus("Ready"), 2000);
           });
 
@@ -185,16 +164,8 @@ export default function OrbitPhone() {
             setStatus(`Error: ${err.message}`);
             setIncoming(false);
             setInCall(false);
-            setOnHold(false);
             callRef.current = null;
             setPhoneNumber("");
-            
-            // Stop hold music if playing
-            if (holdMusicRef.current) {
-              holdMusicRef.current.pause();
-              holdMusicRef.current.currentTime = 0;
-            }
-            
             setTimeout(() => setStatus("Ready"), 2000);
           });
         });
@@ -255,36 +226,21 @@ export default function OrbitPhone() {
         console.log("📴 Call ended");
         setInCall(false);
         setMicMuted(false);
-        setOnHold(false);
         callRef.current = null;
         setStatus("Call ended");
         setPhoneNumber("");
-        
-        // Stop hold music if playing
-        if (holdMusicRef.current) {
-          holdMusicRef.current.pause();
-          holdMusicRef.current.currentTime = 0;
-        }
-        
         if (isOutbound) setTimeout(() => window.close(), 1000);
+        setIsOnHold(false);
       });
 
       call.on("error", (err) => {
         console.error("⚠️ Call error:", err);
         setStatus(`Call failed: ${err.message}`);
         setInCall(false);
-        setOnHold(false);
-        
-        // Stop hold music if playing
-        if (holdMusicRef.current) {
-          holdMusicRef.current.pause();
-          holdMusicRef.current.currentTime = 0;
-        }
       });
     } catch (err) {
       setStatus(`Connection failed: ${err.message}`);
       setInCall(false);
-      setOnHold(false);
     }
   };
 
@@ -311,13 +267,6 @@ export default function OrbitPhone() {
     callRef.current.disconnect();
     setInCall(false);
     setMicMuted(false);
-    setOnHold(false);
-    
-    // Stop hold music if playing
-    if (holdMusicRef.current) {
-      holdMusicRef.current.pause();
-      holdMusicRef.current.currentTime = 0;
-    }
   };
 
   const toggleMic = () => {
@@ -328,93 +277,34 @@ export default function OrbitPhone() {
 
   const toggleHold = async () => {
     if (!callRef.current) return;
-    
-    // Get the call SID from Twilio call parameters
-    const callSid = callRef.current.parameters.CallSid;
-    
-    if (!callSid) {
-      console.error("No CallSid found");
-      return;
-    }
-    
-    if (!onHold) {
-      // Put call on hold
-      console.log("📴 Putting call on hold");
-      
-      // Mute local microphone
-      callRef.current.mute(true);
-      setMicMuted(true);
-      setOnHold(true);
-      setStatus("On Hold");
-      
-      // Play hold music locally (for agent to hear)
-      if (holdMusicRef.current) {
-        holdMusicRef.current.play().catch(err => {
-          console.error("Error playing local hold music:", err);
+
+    try {
+      const callSid = callRef.current.parameters?.CallSid;
+
+      if (!callSid) {
+        console.error("No CallSid found");
+        return;
+      }
+
+      if (!isOnHold) {
+        await fetch(HOLD_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ callSid }),
         });
+
+        setIsOnHold(true);
+        setStatus("On Hold");
+      } else {
+        // For now just restore UI state
+        setIsOnHold(false);
+        setStatus("Connected");
       }
-      
-      // Call backend to play hold music to the caller
-      try {
-        const response = await fetch(HOLD_CONTROL_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            callSid: callSid,
-            action: 'hold'
-          })
-        });
-        
-        if (!response.ok) {
-          throw new Error('Failed to put call on hold');
-        }
-        
-        const result = await response.json();
-        console.log('Hold music started for caller:', result);
-      } catch (err) {
-        console.error('Error starting hold music:', err);
-        // Even if backend fails, keep local hold state
-      }
-      
-    } else {
-      // Resume call
-      console.log("▶️ Resuming call");
-      
-      // Unmute local microphone
-      callRef.current.mute(false);
-      setMicMuted(false);
-      setOnHold(false);
-      setStatus("Connected");
-      
-      // Stop local hold music
-      if (holdMusicRef.current) {
-        holdMusicRef.current.pause();
-        holdMusicRef.current.currentTime = 0;
-      }
-      
-      // Call backend to stop hold music for the caller
-      try {
-        const response = await fetch(HOLD_CONTROL_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            callSid: callSid,
-            action: 'unhold'
-          })
-        });
-        
-        if (!response.ok) {
-          throw new Error('Failed to resume call');
-        }
-        
-        const result = await response.json();
-        console.log('Call resumed for caller:', result);
-      } catch (err) {
-        console.error('Error resuming call:', err);
-        // Even if backend fails, keep local unhold state
-      }
+    } catch (err) {
+      console.error("Hold error:", err);
     }
   };
+
 
   // Format phone number for display
   const formatPhoneNumber = (num) => {
@@ -458,17 +348,6 @@ export default function OrbitPhone() {
 
   return (
     <div style={styles.page}>
-      {/* Hidden audio element for hold music */}
-      <audio 
-        ref={holdMusicRef} 
-        loop
-        preload="auto"
-      >
-        <source src="https://firebasestorage.googleapis.com/v0/b/vertexifycx-orbit.firebasestorage.app/o/mixkit-beautiful-dream-493.mp3?alt=media&token=50c5f790-54d2-4732-ae36-d24a39d671c8" type="audio/mpeg" />
-        {/* Alternative: Use a more pleasant hold music URL or host your own */}
-        {/* <source src="YOUR_HOLD_MUSIC_URL.mp3" type="audio/mpeg" /> */}
-      </audio>
-
       {/* Audio Enable Modal - Only for inbound mode */}
       {!audioEnabled && !isOutbound && (
         <div style={styles.modal}>
@@ -567,10 +446,9 @@ export default function OrbitPhone() {
                 <button
                   style={{
                     ...styles.controlBtn,
-                    ...(micMuted && !onHold ? styles.controlBtnActive : {}),
+                    ...(micMuted ? styles.controlBtnActive : {}),
                   }}
                   onClick={toggleMic}
-                  disabled={onHold}
                 >
                   <div style={styles.controlIconContainer}>
                     {micMuted ? (
@@ -590,12 +468,7 @@ export default function OrbitPhone() {
                       </svg>
                     )}
                   </div>
-                  <span style={{
-                    ...styles.controlLabel,
-                    ...(onHold ? { opacity: 0.5 } : {})
-                  }}>
-                    {micMuted ? "Unmute" : "Mute"}
-                  </span>
+                  <span style={styles.controlLabel}>{micMuted ? "Unmute" : "Mute"}</span>
                 </button>
 
                 <button style={styles.hangupBtn} onClick={hangup}>
@@ -607,24 +480,22 @@ export default function OrbitPhone() {
                 <button
                   style={{
                     ...styles.controlBtn,
-                    ...(onHold ? styles.controlBtnActive : {}),
+                    ...(isOnHold ? styles.controlBtnActive : {}),
                   }}
                   onClick={toggleHold}
                 >
                   <div style={styles.controlIconContainer}>
-                    {onHold ? (
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                      </svg>
-                    ) : (
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="6" y="4" width="4" height="16"></rect>
-                        <rect x="14" y="4" width="4" height="16"></rect>
-                      </svg>
-                    )}
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="12" y1="8" x2="12" y2="12"></line>
+                      <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
                   </div>
-                  <span style={styles.controlLabel}>{onHold ? "Resume" : "Hold"}</span>
+                  <span style={styles.controlLabel}>
+                    {isOnHold ? "Resume" : "Hold"}
+                  </span>
                 </button>
+
               </div>
             </div>
           )}
