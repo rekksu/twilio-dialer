@@ -10,7 +10,6 @@ const VERIFY_ACCESS_URL =
 export default function OrbitPhone() {
   const deviceRef = useRef(null);
   const callRef = useRef(null);
-  const audioRef = useRef(null);
 
   const [status, setStatus] = useState("Initializing…");
   const [incoming, setIncoming] = useState(false);
@@ -89,32 +88,16 @@ export default function OrbitPhone() {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         stream.getTracks().forEach((t) => t.stop());
 
-        // Audio element for incoming audio
-        audioRef.current = new Audio();
-        audioRef.current.autoplay = true;
-
         // Get Twilio token
         const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
         const { token } = await res.json();
 
-        // Initialize Twilio Device
+        // Initialize Twilio Device with enableRingingState
         const device = new Device(token, {
-          enableRingingState: true,
+          enableRingingState: true, // This is KEY for hearing outbound ringing!
           closeProtection: true,
         });
         deviceRef.current = device;
-        
-        // Setup audio routing
-        device.audio.incoming(audioRef.current);
-        
-        // Enable outgoing ringtone - this should play while dialing
-        device.audio.ringtoneDevices.set("default");
-        device.audio.speakerDevices.set("default");
-        
-        console.log("🔊 Audio devices configured:", {
-          ringtone: device.audio.ringtoneDevices.get(),
-          speaker: device.audio.speakerDevices.get()
-        });
 
         // Incoming calls
         device.on("incoming", (call) => {
@@ -219,18 +202,17 @@ export default function OrbitPhone() {
       });
 
       callRef.current = call;
-      
-      // Listen for ringing state (when call is being placed)
+      setInCall(true);
+
+      // Listen for ringing event - this is when the ringtone should play
       call.on("ringing", () => {
-        console.log("📞 Call is ringing...");
+        console.log("📞 Ringing...");
         setStatus("Ringing...");
-        setInCall(true);
       });
 
       call.on("accept", () => {
-        console.log("✅ Call answered");
+        console.log("✅ Call connected");
         setStatus("Connected");
-        setInCall(true);
       });
 
       call.on("disconnect", () => {
@@ -249,7 +231,6 @@ export default function OrbitPhone() {
         setInCall(false);
       });
     } catch (err) {
-      console.error("❌ Connection failed:", err);
       setStatus(`Connection failed: ${err.message}`);
       setInCall(false);
     }
