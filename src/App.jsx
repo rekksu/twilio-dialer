@@ -104,6 +104,9 @@ export default function OrbitPhone() {
         });
         deviceRef.current = device;
         device.audio.incoming(audioRef.current);
+        
+        // Enable outgoing ringtone (the dialing sound you hear while calling)
+        device.audio.outgoing(true);
 
         // Incoming calls
         device.on("incoming", (call) => {
