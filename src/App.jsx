@@ -7,7 +7,7 @@ const TOKEN_URL =
 const VERIFY_ACCESS_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
 const HOLD_CONTROL_URL =
-  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/holdControl"; // UPDATE THIS after deploying your Google Cloud Function
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/holdCall"; // UPDATE THIS after deploying your Google Cloud Function
 
 export default function OrbitPhone() {
   const deviceRef = useRef(null);
