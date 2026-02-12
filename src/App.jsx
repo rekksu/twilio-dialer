@@ -103,7 +103,18 @@ export default function OrbitPhone() {
           closeProtection: true,
         });
         deviceRef.current = device;
+        
+        // Setup audio routing
         device.audio.incoming(audioRef.current);
+        
+        // Enable outgoing ringtone - this should play while dialing
+        device.audio.ringtoneDevices.set("default");
+        device.audio.speakerDevices.set("default");
+        
+        console.log("🔊 Audio devices configured:", {
+          ringtone: device.audio.ringtoneDevices.get(),
+          speaker: device.audio.speakerDevices.get()
+        });
 
         // Incoming calls
         device.on("incoming", (call) => {
@@ -208,13 +219,22 @@ export default function OrbitPhone() {
       });
 
       callRef.current = call;
-      setInCall(true);
+      
+      // Listen for ringing state (when call is being placed)
+      call.on("ringing", () => {
+        console.log("📞 Call is ringing...");
+        setStatus("Ringing...");
+        setInCall(true);
+      });
 
       call.on("accept", () => {
+        console.log("✅ Call answered");
         setStatus("Connected");
+        setInCall(true);
       });
 
       call.on("disconnect", () => {
+        console.log("📴 Call ended");
         setInCall(false);
         setMicMuted(false);
         callRef.current = null;
@@ -224,10 +244,12 @@ export default function OrbitPhone() {
       });
 
       call.on("error", (err) => {
+        console.error("⚠️ Call error:", err);
         setStatus(`Call failed: ${err.message}`);
         setInCall(false);
       });
     } catch (err) {
+      console.error("❌ Connection failed:", err);
       setStatus(`Connection failed: ${err.message}`);
       setInCall(false);
     }
