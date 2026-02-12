@@ -6,6 +6,8 @@ const TOKEN_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 const VERIFY_ACCESS_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
+const HOLD_CONTROL_URL =
+  "https://hold-control-2835.twil.io/path_1"; // UPDATE THIS with your Twilio Function URL
 
 export default function OrbitPhone() {
   const deviceRef = useRef(null);
@@ -324,43 +326,92 @@ export default function OrbitPhone() {
     setMicMuted(!micMuted);
   };
 
-  const toggleHold = () => {
+  const toggleHold = async () => {
     if (!callRef.current) return;
     
-    const params = callRef.current.parameters;
+    // Get the call SID from Twilio call parameters
+    const callSid = callRef.current.parameters.CallSid;
     
-    // Send DTMF or use Twilio's custom parameters to signal hold
-    // Note: Twilio Voice SDK doesn't have a native "hold" method,
-    // so we implement it by muting the call and updating UI
-    // For full hold with music, you'd need server-side implementation
+    if (!callSid) {
+      console.error("No CallSid found");
+      return;
+    }
     
     if (!onHold) {
       // Put call on hold
       console.log("📴 Putting call on hold");
+      
+      // Mute local microphone
       callRef.current.mute(true);
       setMicMuted(true);
       setOnHold(true);
       setStatus("On Hold");
       
-      // Play hold music
+      // Play hold music locally (for agent to hear)
       if (holdMusicRef.current) {
         holdMusicRef.current.play().catch(err => {
-          console.error("Error playing hold music:", err);
+          console.error("Error playing local hold music:", err);
         });
+      }
+      
+      // Call backend to play hold music to the caller
+      try {
+        const response = await fetch(HOLD_CONTROL_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            callSid: callSid,
+            action: 'hold'
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to put call on hold');
+        }
+        
+        const result = await response.json();
+        console.log('Hold music started for caller:', result);
+      } catch (err) {
+        console.error('Error starting hold music:', err);
+        // Even if backend fails, keep local hold state
       }
       
     } else {
       // Resume call
       console.log("▶️ Resuming call");
+      
+      // Unmute local microphone
       callRef.current.mute(false);
       setMicMuted(false);
       setOnHold(false);
       setStatus("Connected");
       
-      // Stop hold music
+      // Stop local hold music
       if (holdMusicRef.current) {
         holdMusicRef.current.pause();
         holdMusicRef.current.currentTime = 0;
+      }
+      
+      // Call backend to stop hold music for the caller
+      try {
+        const response = await fetch(HOLD_CONTROL_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            callSid: callSid,
+            action: 'unhold'
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to resume call');
+        }
+        
+        const result = await response.json();
+        console.log('Call resumed for caller:', result);
+      } catch (err) {
+        console.error('Error resuming call:', err);
+        // Even if backend fails, keep local unhold state
       }
     }
   };
@@ -413,7 +464,7 @@ export default function OrbitPhone() {
         loop
         preload="auto"
       >
-        <source src="https://firebasestorage.googleapis.com/v0/b/vertexifycx-orbit.firebasestorage.app/o/mixkit-beautiful-dream-493.mp3?alt=media&token=50c5f790-54d2-4732-ae36-d24a39d671c8" type="audio/mpeg" />
+        <source src="https://assets.mixkit.co/active_storage/sfx/2997/2997-preview.mp3" type="audio/mpeg" />
         {/* Alternative: Use a more pleasant hold music URL or host your own */}
         {/* <source src="YOUR_HOLD_MUSIC_URL.mp3" type="audio/mpeg" /> */}
       </audio>
