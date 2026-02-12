@@ -464,7 +464,7 @@ export default function OrbitPhone() {
         loop
         preload="auto"
       >
-        <source src="https://assets.mixkit.co/active_storage/sfx/2997/2997-preview.mp3" type="audio/mpeg" />
+        <source src="https://firebasestorage.googleapis.com/v0/b/vertexifycx-orbit.firebasestorage.app/o/mixkit-beautiful-dream-493.mp3?alt=media&token=50c5f790-54d2-4732-ae36-d24a39d671c8" type="audio/mpeg" />
         {/* Alternative: Use a more pleasant hold music URL or host your own */}
         {/* <source src="YOUR_HOLD_MUSIC_URL.mp3" type="audio/mpeg" /> */}
       </audio>
