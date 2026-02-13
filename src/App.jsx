@@ -32,6 +32,7 @@ export default function OrbitPhone() {
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [newParticipantNumber, setNewParticipantNumber] = useState("");
   const [callSid, setCallSid] = useState("");
+  const [isTransitioningToConference, setIsTransitioningToConference] = useState(false);
 
   // --- URL params
   const params = new URLSearchParams(window.location.search);
@@ -190,17 +191,29 @@ export default function OrbitPhone() {
 
   // Reset call state helper
   const resetCallState = () => {
+    // If transitioning to conference, keep conference settings
+    const keepConference = isTransitioningToConference;
+    
+    console.log("resetCallState called, keepConference:", keepConference);
+    
     setIncoming(false);
     setInCall(false);
     setMicMuted(false);
-    setIsConference(false);
-    setConferenceName("");
-    setParticipants([]);
-    setShowAddParticipant(false);
+    
+    if (!keepConference) {
+      setIsConference(false);
+      setConferenceName("");
+      setParticipants([]);
+      setShowAddParticipant(false);
+    }
+    
     setCallSid("");
     callRef.current = null;
-    setPhoneNumber("");
-    setTimeout(() => setStatus("Ready"), 2000);
+    
+    if (!keepConference) {
+      setPhoneNumber("");
+      setTimeout(() => setStatus("Ready"), 2000);
+    }
   };
 
   // --- Outbound call (regular or conference)
@@ -216,6 +229,7 @@ export default function OrbitPhone() {
     }
 
     setStatus(`Calling ${number}...`);
+    setPhoneNumber(number);
 
     try {
       const params = {
@@ -223,13 +237,22 @@ export default function OrbitPhone() {
         From: fromNumber || "+1234567890"
       };
 
+      // Use existing conference name if converting, otherwise create new
+      let confName = conferenceName;
+      
       // If starting as conference, pass conference parameters
-      if (asConference) {
-        const confName = `conf_${agentId}_${Date.now()}`;
+      if (asConference || isConference) {
+        if (!confName) {
+          confName = `conf_${agentId}_${Date.now()}`;
+          setConferenceName(confName);
+        }
         params.conferenceMode = "true";
         params.conferenceName = confName;
         setIsConference(true);
-        setConferenceName(confName);
+        
+        console.log("🎙️ Starting call in CONFERENCE mode:", confName);
+      } else {
+        console.log("📞 Starting regular call");
       }
 
       const call = await deviceRef.current.connect({ params });
@@ -282,21 +305,39 @@ export default function OrbitPhone() {
       // Generate unique conference name
       const confName = `conf_${agentId}_${Date.now()}`;
       
-      console.log("Setting conference state:");
-      console.log("- conferenceName:", confName);
-      console.log("- isConference: true");
+      console.log("💫 Converting to conference call");
+      console.log("- Current number:", phoneNumber);
+      console.log("- Conference name:", confName);
       
-      // Set conference state immediately
+      // Save the current phone number
+      const currentNumber = phoneNumber;
+      
+      // Set transitioning flag to prevent clearing conference state
+      setIsTransitioningToConference(true);
+      
+      // Set conference state FIRST
       setIsConference(true);
       setConferenceName(confName);
-      setStatus("Conference mode activated");
+      setStatus("Converting to conference...");
       
-      console.log("Conference started successfully!");
-      console.log("Button should now show 'Add' instead of 'Conf'");
+      // Disconnect current call
+      console.log("Disconnecting current call...");
+      callRef.current.disconnect();
+      
+      // Wait for disconnect to complete, then rejoin as conference
+      setTimeout(() => {
+        console.log("🎙️ Restarting as conference call");
+        setInCall(false); // Reset call state
+        setIsTransitioningToConference(false); // Clear flag
+        makeOutbound(currentNumber, true);
+      }, 1000);
       
     } catch (err) {
       console.error("Failed to start conference:", err);
       setStatus("Failed to start conference");
+      setIsConference(false);
+      setConferenceName("");
+      setIsTransitioningToConference(false);
     }
   };
 
