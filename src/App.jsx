@@ -291,55 +291,124 @@ export default function OrbitPhone() {
   };
 
   // --- Start conference from active call
-  const startConference = () => {
-    console.log("=== startConference called ===");
-    console.log("callRef.current:", callRef.current);
-    console.log("phoneNumber:", phoneNumber);
+ // --- Start conference from active call
+const startConference = async () => {
+  console.log("=== startConference called ===");
+  console.log("callRef.current:", callRef.current);
+  console.log("phoneNumber:", phoneNumber);
+  
+  if (!callRef.current || !phoneNumber) {
+    console.log("Cannot start conference - missing call or phone number");
+    return;
+  }
+  
+  try {
+    // Generate unique conference name
+    const confName = `conf_${agentId}_${Date.now()}`;
     
-    if (!callRef.current || !phoneNumber) {
-      console.log("Cannot start conference - missing call or phone number");
-      return;
-    }
+    console.log("💫 Converting to conference call");
+    console.log("- Current number:", phoneNumber);
+    console.log("- Conference name:", confName);
     
-    try {
-      // Generate unique conference name
-      const confName = `conf_${agentId}_${Date.now()}`;
-      
-      console.log("💫 Converting to conference call");
-      console.log("- Current number:", phoneNumber);
-      console.log("- Conference name:", confName);
-      
-      // Save the current phone number
-      const currentNumber = phoneNumber;
-      
-      // Set transitioning flag to prevent clearing conference state
-      setIsTransitioningToConference(true);
-      
-      // Set conference state FIRST
-      setIsConference(true);
-      setConferenceName(confName);
-      setStatus("Converting to conference...");
-      
-      // Disconnect current call
-      console.log("Disconnecting current call...");
-      callRef.current.disconnect();
-      
-      // Wait for disconnect to complete, then rejoin as conference
-      setTimeout(() => {
-        console.log("🎙️ Restarting as conference call");
-        setInCall(false); // Reset call state
-        setIsTransitioningToConference(false); // Clear flag
-        makeOutbound(currentNumber, true);
-      }, 1000);
-      
-    } catch (err) {
-      console.error("Failed to start conference:", err);
-      setStatus("Failed to start conference");
-      setIsConference(false);
-      setConferenceName("");
+    // Save the current phone number
+    const currentNumber = phoneNumber;
+    
+    // Set transitioning flag to prevent clearing conference state
+    setIsTransitioningToConference(true);
+    
+    // Set conference state FIRST
+    setIsConference(true);
+    setConferenceName(confName);
+    setStatus("Converting to conference...");
+    
+    // Disconnect current call
+    console.log("Disconnecting current call...");
+    callRef.current.disconnect();
+    
+    // Wait for disconnect to complete
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    console.log("🎙️ Joining conference room");
+    setInCall(false);
+    
+    // First, YOU join the conference (without calling anyone)
+    // We need to create a special outbound call that goes to a conference room
+    // For this to work, we need to modify the approach
+    
+    // Join the conference by making a call to a special number or endpoint
+    // that puts you in the conference
+    const params = {
+      // Use a dummy number - the TwiML will redirect to conference
+      To: fromNumber || "+1234567890",  
+      From: fromNumber || "+1234567890",
+      conferenceMode: "true",
+      conferenceName: confName,
+    };
+
+    const call = await deviceRef.current.connect({ params });
+    callRef.current = call;
+    setInCall(true);
+
+    call.on("accept", async () => {
+      console.log("✅ You joined the conference");
+      setStatus("In conference");
       setIsTransitioningToConference(false);
-    }
-  };
+      
+      // Now add the original participant
+      console.log("📞 Adding original participant:", currentNumber);
+      setStatus("Adding participant...");
+      
+      try {
+        const response = await fetch(ADD_PARTICIPANT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conferenceName: confName,
+            participantNumber: currentNumber,
+            fromNumber: fromNumber || "+1234567890",
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to add original participant");
+        }
+
+        const data = await response.json();
+        
+        setParticipants([{
+          number: currentNumber,
+          sid: data.callSid,
+          status: "connected"
+        }]);
+        
+        setStatus("Conference active");
+        console.log("✅ Conference ready");
+      } catch (err) {
+        console.error("Failed to add original participant:", err);
+        setStatus("Failed to add participant");
+      }
+    });
+
+    call.on("disconnect", () => {
+      console.log("📴 Conference ended");
+      resetCallState();
+    });
+
+    call.on("error", (err) => {
+      console.error("⚠️ Conference error:", err);
+      setStatus(`Conference failed: ${err.message}`);
+      setInCall(false);
+      setIsTransitioningToConference(false);
+    });
+    
+  } catch (err) {
+    console.error("Failed to start conference:", err);
+    setStatus("Failed to start conference");
+    setIsConference(false);
+    setConferenceName("");
+    setIsTransitioningToConference(false);
+  }
+};
 
   // --- Add participant to conference
   const addParticipant = async () => {
