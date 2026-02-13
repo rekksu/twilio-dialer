@@ -6,6 +6,8 @@ const TOKEN_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 const VERIFY_ACCESS_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
+const HOLD_CALL_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/holdCall";
 
 export default function OrbitPhone() {
   const deviceRef = useRef(null);
@@ -16,10 +18,12 @@ export default function OrbitPhone() {
   const [inCall, setInCall] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
+  const [onHold, setOnHold] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [callDuration, setCallDuration] = useState(0);
+  const [currentCallSid, setCurrentCallSid] = useState(null);
 
   // --- URL params
   const params = new URLSearchParams(window.location.search);
@@ -33,15 +37,13 @@ export default function OrbitPhone() {
   // Call duration timer
   useEffect(() => {
     let interval;
-    if (inCall) {
+    if (inCall && !onHold) {
       interval = setInterval(() => {
         setCallDuration((prev) => prev + 1);
       }, 1000);
-    } else {
-      setCallDuration(0);
     }
     return () => clearInterval(interval);
-  }, [inCall]);
+  }, [inCall, onHold]);
 
   // Format call duration
   const formatDuration = (seconds) => {
@@ -94,7 +96,7 @@ export default function OrbitPhone() {
 
         // Initialize Twilio Device with enableRingingState
         const device = new Device(token, {
-          enableRingingState: true, // This is KEY for hearing outbound ringing!
+          enableRingingState: true,
           closeProtection: true,
         });
         deviceRef.current = device;
@@ -103,6 +105,14 @@ export default function OrbitPhone() {
         device.on("incoming", (call) => {
           console.log("📞 Incoming call received:", call.parameters);
           callRef.current = call;
+          
+          // Extract CallSid from call parameters
+          const callSid = call.parameters.CallSid || call.customParameters?.CallSid;
+          if (callSid) {
+            setCurrentCallSid(callSid);
+            console.log("📝 CallSid stored:", callSid);
+          }
+          
           setIncoming(true);
           setPhoneNumber(call.parameters.From || "Unknown");
           setStatus("Incoming call...");
@@ -115,25 +125,29 @@ export default function OrbitPhone() {
             setStatus("Connected");
           });
 
-          // When caller hangs up (either during ringing or after connected)
+          // When caller hangs up
           call.on("disconnect", () => {
             console.log("📴 Call disconnected");
             setIncoming(false);
             setInCall(false);
             setMicMuted(false);
+            setOnHold(false);
             callRef.current = null;
+            setCurrentCallSid(null);
             setStatus("Call ended");
             setPhoneNumber("");
             setTimeout(() => setStatus("Ready"), 2000);
           });
 
-          // When caller cancels (hangs up during ringing before you answer)
+          // When caller cancels
           call.on("cancel", () => {
             console.log("❌ Call cancelled by caller");
             setIncoming(false);
             setInCall(false);
             setMicMuted(false);
+            setOnHold(false);
             callRef.current = null;
+            setCurrentCallSid(null);
             setStatus("Missed call");
             setPhoneNumber("");
             setTimeout(() => setStatus("Ready"), 2000);
@@ -145,7 +159,9 @@ export default function OrbitPhone() {
             setIncoming(false);
             setInCall(false);
             setMicMuted(false);
+            setOnHold(false);
             callRef.current = null;
+            setCurrentCallSid(null);
             setStatus("Call rejected");
             setPhoneNumber("");
             setTimeout(() => setStatus("Ready"), 2000);
@@ -157,7 +173,9 @@ export default function OrbitPhone() {
             setStatus(`Error: ${err.message}`);
             setIncoming(false);
             setInCall(false);
+            setOnHold(false);
             callRef.current = null;
+            setCurrentCallSid(null);
             setPhoneNumber("");
             setTimeout(() => setStatus("Ready"), 2000);
           });
@@ -173,7 +191,6 @@ export default function OrbitPhone() {
           setPhoneNumber(toNumber);
           setTimeout(() => makeOutbound(toNumber), 200);
         }
-        // For inbound, don't auto-enable - let user enable to hear ringing
       } catch (err) {
         setStatus(`Setup failed: ${err.message}`);
       }
@@ -202,9 +219,17 @@ export default function OrbitPhone() {
       });
 
       callRef.current = call;
+      
+      // Try to get CallSid from call object
+      const callSid = call.parameters?.CallSid || call.customParameters?.CallSid;
+      if (callSid) {
+        setCurrentCallSid(callSid);
+        console.log("📝 Outbound CallSid stored:", callSid);
+      }
+      
       setInCall(true);
 
-      // Listen for ringing event - this is when the ringtone should play
+      // Listen for ringing event
       call.on("ringing", () => {
         console.log("📞 Ringing...");
         setStatus("Ringing...");
@@ -219,7 +244,9 @@ export default function OrbitPhone() {
         console.log("📴 Call ended");
         setInCall(false);
         setMicMuted(false);
+        setOnHold(false);
         callRef.current = null;
+        setCurrentCallSid(null);
         setStatus("Call ended");
         setPhoneNumber("");
         if (isOutbound) setTimeout(() => window.close(), 1000);
@@ -229,6 +256,7 @@ export default function OrbitPhone() {
         console.error("⚠️ Call error:", err);
         setStatus(`Call failed: ${err.message}`);
         setInCall(false);
+        setOnHold(false);
       });
     } catch (err) {
       setStatus(`Connection failed: ${err.message}`);
@@ -259,12 +287,52 @@ export default function OrbitPhone() {
     callRef.current.disconnect();
     setInCall(false);
     setMicMuted(false);
+    setOnHold(false);
   };
 
   const toggleMic = () => {
     if (!callRef.current) return;
     callRef.current.mute(!micMuted);
     setMicMuted(!micMuted);
+  };
+
+  // --- Hold/Unhold functionality
+  const toggleHold = async () => {
+    if (!callRef.current || !currentCallSid) {
+      console.error("❌ Cannot toggle hold: No active call or CallSid");
+      setStatus("Hold unavailable");
+      setTimeout(() => setStatus("Connected"), 2000);
+      return;
+    }
+
+    const newHoldState = !onHold;
+    setStatus(newHoldState ? "Putting on hold..." : "Resuming call...");
+
+    try {
+      console.log(`${newHoldState ? "⏸️" : "▶️"} Toggling hold for CallSid:`, currentCallSid);
+      
+      const response = await fetch(HOLD_CALL_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          callSid: currentCallSid,
+          hold: newHoldState,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Hold request failed");
+      }
+
+      setOnHold(newHoldState);
+      setStatus(newHoldState ? "On Hold" : "Connected");
+      console.log(`✅ Hold ${newHoldState ? "enabled" : "disabled"}`);
+    } catch (err) {
+      console.error("⚠️ Hold toggle error:", err);
+      setStatus(`Hold failed: ${err.message}`);
+      setTimeout(() => setStatus("Connected"), 3000);
+    }
   };
 
   // Format phone number for display
@@ -438,15 +506,26 @@ export default function OrbitPhone() {
                   </svg>
                 </button>
 
-                <button style={styles.controlBtn}>
+                <button
+                  style={{
+                    ...styles.controlBtn,
+                    ...(onHold ? styles.controlBtnActive : {}),
+                  }}
+                  onClick={toggleHold}
+                >
                   <div style={styles.controlIconContainer}>
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="12" cy="12" r="10"></circle>
-                      <line x1="12" y1="8" x2="12" y2="12"></line>
-                      <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                    </svg>
+                    {onHold ? (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                      </svg>
+                    ) : (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="6" y="4" width="4" height="16"></rect>
+                        <rect x="14" y="4" width="4" height="16"></rect>
+                      </svg>
+                    )}
                   </div>
-                  <span style={styles.controlLabel}>Hold</span>
+                  <span style={styles.controlLabel}>{onHold ? "Resume" : "Hold"}</span>
                 </button>
               </div>
             </div>
@@ -551,7 +630,6 @@ const styles = {
     justifyContent: "center",
     padding: 60,
   },
-  // Incoming call styles
   incomingContainer: {
     padding: "60px 32px",
     display: "flex",
@@ -642,7 +720,6 @@ const styles = {
     boxShadow: "0 8px 20px rgba(239, 68, 68, 0.3)",
     transition: "all 0.2s ease",
   },
-  // Active call styles
   activeCallContainer: {
     padding: "48px 32px",
     display: "flex",
@@ -738,7 +815,6 @@ const styles = {
     boxShadow: "0 10px 25px rgba(239, 68, 68, 0.4)",
     transition: "all 0.2s ease",
   },
-  // Idle state styles
   idleContainer: {
     padding: "80px 32px",
     textAlign: "center",
@@ -764,7 +840,6 @@ const styles = {
     color: "#64748b",
     fontWeight: 500,
   },
-  // Loading & Error states
   loader: {
     width: 56,
     height: 56,
@@ -792,7 +867,6 @@ const styles = {
     fontSize: 15,
     color: "#64748b",
   },
-  // Modal styles
   modal: {
     position: "fixed",
     inset: 0,
