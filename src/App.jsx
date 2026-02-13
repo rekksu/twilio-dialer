@@ -6,8 +6,6 @@ const TOKEN_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 const VERIFY_ACCESS_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
-const TOGGLE_HOLD_URL =
-  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/toggleHold";
 
 export default function OrbitPhone() {
   const deviceRef = useRef(null);
@@ -18,13 +16,10 @@ export default function OrbitPhone() {
   const [inCall, setInCall] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
-  const [onHold, setOnHold] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [callDuration, setCallDuration] = useState(0);
-  const [conferenceSid, setConferenceSid] = useState(null);
-  const [customerCallSid, setCustomerCallSid] = useState(null);
 
   // --- URL params
   const params = new URLSearchParams(window.location.search);
@@ -38,13 +33,15 @@ export default function OrbitPhone() {
   // Call duration timer
   useEffect(() => {
     let interval;
-    if (inCall && !onHold) {
+    if (inCall) {
       interval = setInterval(() => {
         setCallDuration((prev) => prev + 1);
       }, 1000);
+    } else {
+      setCallDuration(0);
     }
     return () => clearInterval(interval);
-  }, [inCall, onHold]);
+  }, [inCall]);
 
   // Format call duration
   const formatDuration = (seconds) => {
@@ -95,9 +92,9 @@ export default function OrbitPhone() {
         const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
         const { token } = await res.json();
 
-        // Initialize Twilio Device
+        // Initialize Twilio Device with enableRingingState
         const device = new Device(token, {
-          enableRingingState: true,
+          enableRingingState: true, // This is KEY for hearing outbound ringing!
           closeProtection: true,
         });
         deviceRef.current = device;
@@ -110,15 +107,6 @@ export default function OrbitPhone() {
           setPhoneNumber(call.parameters.From || "Unknown");
           setStatus("Incoming call...");
 
-          // Extract conference info from custom params
-          const customParams = call.customParameters;
-          if (customParams && customParams.get) {
-            const confSid = customParams.get("ConferenceSid");
-            const custCallSid = customParams.get("CustomerCallSid");
-            if (confSid) setConferenceSid(confSid);
-            if (custCallSid) setCustomerCallSid(custCallSid);
-          }
-
           // When call is accepted
           call.on("accept", () => {
             console.log("✅ Call accepted");
@@ -127,25 +115,39 @@ export default function OrbitPhone() {
             setStatus("Connected");
           });
 
-          // When call disconnects
+          // When caller hangs up (either during ringing or after connected)
           call.on("disconnect", () => {
             console.log("📴 Call disconnected");
-            resetCallState();
-          });
-
-          // When caller cancels
-          call.on("cancel", () => {
-            console.log("❌ Call cancelled by caller");
             setIncoming(false);
-            setStatus("Missed call");
+            setInCall(false);
+            setMicMuted(false);
+            callRef.current = null;
+            setStatus("Call ended");
+            setPhoneNumber("");
             setTimeout(() => setStatus("Ready"), 2000);
           });
 
-          // When you reject
+          // When caller cancels (hangs up during ringing before you answer)
+          call.on("cancel", () => {
+            console.log("❌ Call cancelled by caller");
+            setIncoming(false);
+            setInCall(false);
+            setMicMuted(false);
+            callRef.current = null;
+            setStatus("Missed call");
+            setPhoneNumber("");
+            setTimeout(() => setStatus("Ready"), 2000);
+          });
+
+          // When you reject the call
           call.on("reject", () => {
             console.log("🚫 Call rejected");
             setIncoming(false);
+            setInCall(false);
+            setMicMuted(false);
+            callRef.current = null;
             setStatus("Call rejected");
+            setPhoneNumber("");
             setTimeout(() => setStatus("Ready"), 2000);
           });
 
@@ -153,7 +155,11 @@ export default function OrbitPhone() {
           call.on("error", (err) => {
             console.error("⚠️ Call error:", err);
             setStatus(`Error: ${err.message}`);
-            resetCallState();
+            setIncoming(false);
+            setInCall(false);
+            callRef.current = null;
+            setPhoneNumber("");
+            setTimeout(() => setStatus("Ready"), 2000);
           });
         });
 
@@ -161,12 +167,13 @@ export default function OrbitPhone() {
         await device.register();
         setStatus("Ready");
 
-        // Auto outbound call
+        // Auto outbound call or wait for inbound
         if (isOutbound) {
           setAudioEnabled(true);
           setPhoneNumber(toNumber);
           setTimeout(() => makeOutbound(toNumber), 200);
         }
+        // For inbound, don't auto-enable - let user enable to hear ringing
       } catch (err) {
         setStatus(`Setup failed: ${err.message}`);
       }
@@ -175,21 +182,7 @@ export default function OrbitPhone() {
     initDevice();
   }, [agentId, isOutbound]);
 
-  // Reset call state helper
-  const resetCallState = () => {
-    setIncoming(false);
-    setInCall(false);
-    setMicMuted(false);
-    setOnHold(false);
-    setConferenceSid(null);
-    setCustomerCallSid(null);
-    callRef.current = null;
-    setStatus("Call ended");
-    setPhoneNumber("");
-    setTimeout(() => setStatus("Ready"), 2000);
-  };
-
-  // --- Outbound call (now with conference)
+  // --- Outbound call
   const makeOutbound = async (number = phoneNumber) => {
     if (!deviceRef.current) {
       setStatus("Device not ready");
@@ -204,42 +197,31 @@ export default function OrbitPhone() {
     setStatus(`Calling ${number}...`);
 
     try {
-      // Create a unique conference name for this call
-      const conferenceRoom = `orbit-outbound-${Date.now()}`;
-
       const call = await deviceRef.current.connect({
-        params: {
-          To: number,
-          From: fromNumber || "+1234567890",
-          conference: conferenceRoom, // Pass conference name
-        },
+        params: { To: number, From: fromNumber || "+1234567890" },
       });
 
       callRef.current = call;
       setInCall(true);
 
-      // Listen for ringing
+      // Listen for ringing event - this is when the ringtone should play
       call.on("ringing", () => {
         console.log("📞 Ringing...");
         setStatus("Ringing...");
       });
 
-      // Extract conference info from call parameters
       call.on("accept", () => {
         console.log("✅ Call connected");
         setStatus("Connected");
-        
-        // Try to get conference SID from call parameters
-        const params = call.parameters;
-        if (params) {
-          console.log("Call parameters:", params);
-          // Conference SID might be available in call parameters
-        }
       });
 
       call.on("disconnect", () => {
         console.log("📴 Call ended");
-        resetCallState();
+        setInCall(false);
+        setMicMuted(false);
+        callRef.current = null;
+        setStatus("Call ended");
+        setPhoneNumber("");
         if (isOutbound) setTimeout(() => window.close(), 1000);
       });
 
@@ -277,72 +259,12 @@ export default function OrbitPhone() {
     callRef.current.disconnect();
     setInCall(false);
     setMicMuted(false);
-    setOnHold(false);
   };
 
   const toggleMic = () => {
     if (!callRef.current) return;
     callRef.current.mute(!micMuted);
     setMicMuted(!micMuted);
-  };
-
-  // --- REAL HOLD FUNCTIONALITY ---
-  const toggleHold = async () => {
-    if (!callRef.current) {
-      console.error("No active call");
-      return;
-    }
-
-    // Get conference and call SIDs
-    const params = callRef.current.parameters;
-    console.log("Call parameters:", params);
-
-    // For conference-based calls, we need the ConferenceSid and CallSid
-    const confSid = conferenceSid || params?.ConferenceSid;
-    const participantSid = customerCallSid || params?.CallSid;
-
-    if (!confSid || !participantSid) {
-      console.error("Missing conference or participant SID", {
-        confSid,
-        participantSid,
-      });
-      // Fallback: just mute locally if we can't get conference info
-      setOnHold(!onHold);
-      toggleMic();
-      return;
-    }
-
-    try {
-      const newHoldState = !onHold;
-      
-      const response = await fetch(TOGGLE_HOLD_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conferenceSid: confSid,
-          participantCallSid: participantSid,
-          hold: newHoldState,
-        }),
-      });
-
-      const data = await response.json();
-      
-      if (data.success) {
-        setOnHold(newHoldState);
-        setStatus(newHoldState ? "On Hold" : "Connected");
-        console.log(`Hold ${newHoldState ? "enabled" : "disabled"}`);
-      } else {
-        console.error("Failed to toggle hold:", data.error);
-        // Fallback to local mute
-        setOnHold(newHoldState);
-        toggleMic();
-      }
-    } catch (err) {
-      console.error("Error toggling hold:", err);
-      // Fallback to local mute
-      setOnHold(!onHold);
-      toggleMic();
-    }
   };
 
   // Format phone number for display
@@ -516,21 +438,15 @@ export default function OrbitPhone() {
                   </svg>
                 </button>
 
-                <button
-                  style={{
-                    ...styles.controlBtn,
-                    ...(onHold ? styles.controlBtnActive : {}),
-                  }}
-                  onClick={toggleHold}
-                >
+                <button style={styles.controlBtn}>
                   <div style={styles.controlIconContainer}>
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="12" cy="12" r="1"></circle>
-                      <circle cx="12" cy="5" r="1"></circle>
-                      <circle cx="12" cy="19" r="1"></circle>
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="12" y1="8" x2="12" y2="12"></line>
+                      <line x1="12" y1="16" x2="12.01" y2="16"></line>
                     </svg>
                   </div>
-                  <span style={styles.controlLabel}>{onHold ? "Resume" : "Hold"}</span>
+                  <span style={styles.controlLabel}>Hold</span>
                 </button>
               </div>
             </div>
