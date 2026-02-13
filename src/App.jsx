@@ -10,12 +10,14 @@ const VERIFY_ACCESS_URL =
 export default function OrbitPhone() {
   const deviceRef = useRef(null);
   const callRef = useRef(null);
+  const holdMusicRef = useRef(null);
 
   const [status, setStatus] = useState("Initializing…");
   const [incoming, setIncoming] = useState(false);
   const [inCall, setInCall] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
+  const [onHold, setOnHold] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -30,18 +32,32 @@ export default function OrbitPhone() {
 
   const isOutbound = !!(fromNumber && toNumber);
 
+  // Initialize hold music audio element
+  useEffect(() => {
+    // Create an audio element for hold music
+    // Using a royalty-free hold music URL or you can host your own
+    holdMusicRef.current = new Audio("https://www.twilio.com/docs/voice/twiml/play/hold-music.mp3");
+    holdMusicRef.current.loop = true;
+    holdMusicRef.current.volume = 0.3;
+
+    return () => {
+      if (holdMusicRef.current) {
+        holdMusicRef.current.pause();
+        holdMusicRef.current = null;
+      }
+    };
+  }, []);
+
   // Call duration timer
   useEffect(() => {
     let interval;
-    if (inCall) {
+    if (inCall && !onHold) {
       interval = setInterval(() => {
         setCallDuration((prev) => prev + 1);
       }, 1000);
-    } else {
-      setCallDuration(0);
     }
     return () => clearInterval(interval);
-  }, [inCall]);
+  }, [inCall, onHold]);
 
   // Format call duration
   const formatDuration = (seconds) => {
@@ -94,7 +110,7 @@ export default function OrbitPhone() {
 
         // Initialize Twilio Device with enableRingingState
         const device = new Device(token, {
-          enableRingingState: true, // This is KEY for hearing outbound ringing!
+          enableRingingState: true,
           closeProtection: true,
         });
         deviceRef.current = device;
@@ -121,6 +137,11 @@ export default function OrbitPhone() {
             setIncoming(false);
             setInCall(false);
             setMicMuted(false);
+            setOnHold(false);
+            if (holdMusicRef.current) {
+              holdMusicRef.current.pause();
+              holdMusicRef.current.currentTime = 0;
+            }
             callRef.current = null;
             setStatus("Call ended");
             setPhoneNumber("");
@@ -133,6 +154,7 @@ export default function OrbitPhone() {
             setIncoming(false);
             setInCall(false);
             setMicMuted(false);
+            setOnHold(false);
             callRef.current = null;
             setStatus("Missed call");
             setPhoneNumber("");
@@ -145,6 +167,7 @@ export default function OrbitPhone() {
             setIncoming(false);
             setInCall(false);
             setMicMuted(false);
+            setOnHold(false);
             callRef.current = null;
             setStatus("Call rejected");
             setPhoneNumber("");
@@ -157,6 +180,7 @@ export default function OrbitPhone() {
             setStatus(`Error: ${err.message}`);
             setIncoming(false);
             setInCall(false);
+            setOnHold(false);
             callRef.current = null;
             setPhoneNumber("");
             setTimeout(() => setStatus("Ready"), 2000);
@@ -173,7 +197,6 @@ export default function OrbitPhone() {
           setPhoneNumber(toNumber);
           setTimeout(() => makeOutbound(toNumber), 200);
         }
-        // For inbound, don't auto-enable - let user enable to hear ringing
       } catch (err) {
         setStatus(`Setup failed: ${err.message}`);
       }
@@ -204,7 +227,6 @@ export default function OrbitPhone() {
       callRef.current = call;
       setInCall(true);
 
-      // Listen for ringing event - this is when the ringtone should play
       call.on("ringing", () => {
         console.log("📞 Ringing...");
         setStatus("Ringing...");
@@ -219,6 +241,11 @@ export default function OrbitPhone() {
         console.log("📴 Call ended");
         setInCall(false);
         setMicMuted(false);
+        setOnHold(false);
+        if (holdMusicRef.current) {
+          holdMusicRef.current.pause();
+          holdMusicRef.current.currentTime = 0;
+        }
         callRef.current = null;
         setStatus("Call ended");
         setPhoneNumber("");
@@ -229,10 +256,12 @@ export default function OrbitPhone() {
         console.error("⚠️ Call error:", err);
         setStatus(`Call failed: ${err.message}`);
         setInCall(false);
+        setOnHold(false);
       });
     } catch (err) {
       setStatus(`Connection failed: ${err.message}`);
       setInCall(false);
+      setOnHold(false);
     }
   };
 
@@ -256,15 +285,71 @@ export default function OrbitPhone() {
 
   const hangup = () => {
     if (!callRef.current) return;
+    
+    // Stop hold music if playing
+    if (holdMusicRef.current) {
+      holdMusicRef.current.pause();
+      holdMusicRef.current.currentTime = 0;
+    }
+    
     callRef.current.disconnect();
     setInCall(false);
     setMicMuted(false);
+    setOnHold(false);
   };
 
   const toggleMic = () => {
     if (!callRef.current) return;
     callRef.current.mute(!micMuted);
     setMicMuted(!micMuted);
+  };
+
+  const toggleHold = () => {
+    if (!callRef.current) return;
+
+    const newHoldState = !onHold;
+    setOnHold(newHoldState);
+
+    if (newHoldState) {
+      // Put call on hold
+      console.log("📵 Putting call on hold");
+      
+      // Mute the microphone
+      callRef.current.mute(true);
+      setMicMuted(true);
+      
+      // Send custom parameters to Twilio to trigger hold music on their end
+      // Note: This requires TwiML configuration on the backend
+      try {
+        callRef.current.sendDigits("*");
+      } catch (err) {
+        console.log("Could not send hold signal:", err);
+      }
+      
+      // Play local hold music for the agent
+      if (holdMusicRef.current) {
+        holdMusicRef.current.play().catch(err => {
+          console.error("Could not play hold music:", err);
+        });
+      }
+      
+      setStatus("On Hold");
+    } else {
+      // Resume call from hold
+      console.log("📞 Resuming call");
+      
+      // Unmute the microphone
+      callRef.current.mute(false);
+      setMicMuted(false);
+      
+      // Stop local hold music
+      if (holdMusicRef.current) {
+        holdMusicRef.current.pause();
+        holdMusicRef.current.currentTime = 0;
+      }
+      
+      setStatus("Connected");
+    }
   };
 
   // Format phone number for display
@@ -407,9 +492,10 @@ export default function OrbitPhone() {
                 <button
                   style={{
                     ...styles.controlBtn,
-                    ...(micMuted ? styles.controlBtnActive : {}),
+                    ...(micMuted && !onHold ? styles.controlBtnActive : {}),
                   }}
                   onClick={toggleMic}
+                  disabled={onHold}
                 >
                   <div style={styles.controlIconContainer}>
                     {micMuted ? (
@@ -438,15 +524,26 @@ export default function OrbitPhone() {
                   </svg>
                 </button>
 
-                <button style={styles.controlBtn}>
+                <button
+                  style={{
+                    ...styles.controlBtn,
+                    ...(onHold ? styles.controlBtnActive : {}),
+                  }}
+                  onClick={toggleHold}
+                >
                   <div style={styles.controlIconContainer}>
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="12" cy="12" r="10"></circle>
-                      <line x1="12" y1="8" x2="12" y2="12"></line>
-                      <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                    </svg>
+                    {onHold ? (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                      </svg>
+                    ) : (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="6" y="4" width="4" height="16"></rect>
+                        <rect x="14" y="4" width="4" height="16"></rect>
+                      </svg>
+                    )}
                   </div>
-                  <span style={styles.controlLabel}>Hold</span>
+                  <span style={styles.controlLabel}>{onHold ? "Resume" : "Hold"}</span>
                 </button>
               </div>
             </div>
