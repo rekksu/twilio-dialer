@@ -7,11 +7,14 @@ const TOKEN_URL =
 const VERIFY_ACCESS_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
 const HOLD_CONTROL_URL =
-  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/holdCall"; // UPDATE THIS after deploying your Google Cloud Function
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/holdCall";
+const CONFERENCE_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/conferenceControl";
 
 export default function OrbitPhone() {
   const deviceRef = useRef(null);
   const callRef = useRef(null);
+  const secondCallRef = useRef(null);
   const holdMusicRef = useRef(null);
 
   const [status, setStatus] = useState("Initializing…");
@@ -24,6 +27,10 @@ export default function OrbitPhone() {
   const [authChecked, setAuthChecked] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [callDuration, setCallDuration] = useState(0);
+  const [inConference, setInConference] = useState(false);
+  const [secondCallNumber, setSecondCallNumber] = useState("");
+  const [showAddCallDialog, setShowAddCallDialog] = useState(false);
+  const [conferenceName, setConferenceName] = useState("");
 
   // --- URL params
   const params = new URLSearchParams(window.location.search);
@@ -98,7 +105,7 @@ export default function OrbitPhone() {
 
         // Initialize Twilio Device with enableRingingState
         const device = new Device(token, {
-          enableRingingState: true, // This is KEY for hearing outbound ringing!
+          enableRingingState: true,
           closeProtection: true,
         });
         deviceRef.current = device;
@@ -106,10 +113,19 @@ export default function OrbitPhone() {
         // Incoming calls
         device.on("incoming", (call) => {
           console.log("📞 Incoming call received:", call.parameters);
-          callRef.current = call;
-          setIncoming(true);
-          setPhoneNumber(call.parameters.From || "Unknown");
-          setStatus("Incoming call...");
+          
+          // If already in a call, this could be a second call
+          if (callRef.current && !inConference) {
+            secondCallRef.current = call;
+            setSecondCallNumber(call.parameters.From || "Unknown");
+            // Auto-accept for conference scenario
+            console.log("📞 Second call detected, preparing for conference");
+          } else {
+            callRef.current = call;
+            setIncoming(true);
+            setPhoneNumber(call.parameters.From || "Unknown");
+            setStatus("Incoming call...");
+          }
 
           // When call is accepted
           call.on("accept", () => {
@@ -119,83 +135,31 @@ export default function OrbitPhone() {
             setStatus("Connected");
           });
 
-          // When caller hangs up (either during ringing or after connected)
+          // When caller hangs up
           call.on("disconnect", () => {
             console.log("📴 Call disconnected");
-            setIncoming(false);
-            setInCall(false);
-            setMicMuted(false);
-            setOnHold(false);
-            callRef.current = null;
-            setStatus("Call ended");
-            setPhoneNumber("");
-            
-            // Stop hold music if playing
-            if (holdMusicRef.current) {
-              holdMusicRef.current.pause();
-              holdMusicRef.current.currentTime = 0;
-            }
-            
-            setTimeout(() => setStatus("Ready"), 2000);
+            handleCallDisconnect();
           });
 
-          // When caller cancels (hangs up during ringing before you answer)
+          // When caller cancels
           call.on("cancel", () => {
             console.log("❌ Call cancelled by caller");
-            setIncoming(false);
-            setInCall(false);
-            setMicMuted(false);
-            setOnHold(false);
-            callRef.current = null;
             setStatus("Missed call");
-            setPhoneNumber("");
-            
-            // Stop hold music if playing
-            if (holdMusicRef.current) {
-              holdMusicRef.current.pause();
-              holdMusicRef.current.currentTime = 0;
-            }
-            
-            setTimeout(() => setStatus("Ready"), 2000);
+            handleCallDisconnect();
           });
 
           // When you reject the call
           call.on("reject", () => {
             console.log("🚫 Call rejected");
-            setIncoming(false);
-            setInCall(false);
-            setMicMuted(false);
-            setOnHold(false);
-            callRef.current = null;
             setStatus("Call rejected");
-            setPhoneNumber("");
-            
-            // Stop hold music if playing
-            if (holdMusicRef.current) {
-              holdMusicRef.current.pause();
-              holdMusicRef.current.currentTime = 0;
-            }
-            
-            setTimeout(() => setStatus("Ready"), 2000);
+            handleCallDisconnect();
           });
 
           // Error handling
           call.on("error", (err) => {
             console.error("⚠️ Call error:", err);
             setStatus(`Error: ${err.message}`);
-            setIncoming(false);
-            setInCall(false);
-            setOnHold(false);
-            callRef.current = null;
-            setPhoneNumber("");
-            
-            // Stop hold music if playing
-            if (holdMusicRef.current) {
-              holdMusicRef.current.pause();
-              holdMusicRef.current.currentTime = 0;
-            }
-            
-            setTimeout(() => setStatus("Ready"), 2000);
+            handleCallDisconnect();
           });
         });
 
@@ -209,7 +173,6 @@ export default function OrbitPhone() {
           setPhoneNumber(toNumber);
           setTimeout(() => makeOutbound(toNumber), 200);
         }
-        // For inbound, don't auto-enable - let user enable to hear ringing
       } catch (err) {
         setStatus(`Setup failed: ${err.message}`);
       }
@@ -217,6 +180,26 @@ export default function OrbitPhone() {
 
     initDevice();
   }, [agentId, isOutbound]);
+
+  const handleCallDisconnect = () => {
+    setIncoming(false);
+    setInCall(false);
+    setMicMuted(false);
+    setOnHold(false);
+    setInConference(false);
+    callRef.current = null;
+    secondCallRef.current = null;
+    setPhoneNumber("");
+    setSecondCallNumber("");
+    
+    // Stop hold music if playing
+    if (holdMusicRef.current) {
+      holdMusicRef.current.pause();
+      holdMusicRef.current.currentTime = 0;
+    }
+    
+    setTimeout(() => setStatus("Ready"), 2000);
+  };
 
   // --- Outbound call
   const makeOutbound = async (number = phoneNumber) => {
@@ -240,7 +223,6 @@ export default function OrbitPhone() {
       callRef.current = call;
       setInCall(true);
 
-      // Listen for ringing event - this is when the ringtone should play
       call.on("ringing", () => {
         console.log("📞 Ringing...");
         setStatus("Ringing...");
@@ -253,38 +235,105 @@ export default function OrbitPhone() {
 
       call.on("disconnect", () => {
         console.log("📴 Call ended");
-        setInCall(false);
-        setMicMuted(false);
-        setOnHold(false);
-        callRef.current = null;
-        setStatus("Call ended");
-        setPhoneNumber("");
-        
-        // Stop hold music if playing
-        if (holdMusicRef.current) {
-          holdMusicRef.current.pause();
-          holdMusicRef.current.currentTime = 0;
-        }
-        
+        handleCallDisconnect();
         if (isOutbound) setTimeout(() => window.close(), 1000);
       });
 
       call.on("error", (err) => {
         console.error("⚠️ Call error:", err);
         setStatus(`Call failed: ${err.message}`);
-        setInCall(false);
-        setOnHold(false);
-        
-        // Stop hold music if playing
-        if (holdMusicRef.current) {
-          holdMusicRef.current.pause();
-          holdMusicRef.current.currentTime = 0;
-        }
+        handleCallDisconnect();
       });
     } catch (err) {
       setStatus(`Connection failed: ${err.message}`);
       setInCall(false);
       setOnHold(false);
+    }
+  };
+
+  // --- Add second call for conference
+  const addCallToConference = async () => {
+    if (!secondCallNumber) {
+      alert("Please enter a phone number");
+      return;
+    }
+
+    setStatus(`Adding ${secondCallNumber}...`);
+
+    try {
+      const call = await deviceRef.current.connect({
+        params: { 
+          To: secondCallNumber, 
+          From: fromNumber || "+1234567890"
+        },
+      });
+
+      secondCallRef.current = call;
+
+      call.on("accept", () => {
+        console.log("✅ Second call connected");
+        setStatus("Second party connected");
+      });
+
+      call.on("disconnect", () => {
+        console.log("📴 Second call ended");
+        secondCallRef.current = null;
+        setSecondCallNumber("");
+        if (inConference) {
+          setInConference(false);
+          setStatus("Conference ended");
+        }
+      });
+
+      setShowAddCallDialog(false);
+    } catch (err) {
+      setStatus(`Failed to add call: ${err.message}`);
+    }
+  };
+
+  // --- Start Conference
+  const startConference = async () => {
+    if (!callRef.current || !secondCallRef.current) {
+      alert("You need two active calls to start a conference");
+      return;
+    }
+
+    const call1Sid = callRef.current.parameters.CallSid;
+    const call2Sid = secondCallRef.current.parameters.CallSid;
+    
+    if (!call1Sid || !call2Sid) {
+      console.error("Missing CallSid for conference");
+      return;
+    }
+
+    try {
+      // Generate unique conference name
+      const confName = `conf-${agentId}-${Date.now()}`;
+      setConferenceName(confName);
+
+      const response = await fetch(CONFERENCE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'start',
+          conferenceName: confName,
+          call1Sid: call1Sid,
+          call2Sid: call2Sid
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to start conference');
+      }
+
+      const result = await response.json();
+      console.log('Conference started:', result);
+      
+      setInConference(true);
+      setStatus("Conference active");
+    } catch (err) {
+      console.error('Error starting conference:', err);
+      alert('Failed to start conference: ' + err.message);
     }
   };
 
@@ -307,17 +356,19 @@ export default function OrbitPhone() {
   };
 
   const hangup = () => {
-    if (!callRef.current) return;
-    callRef.current.disconnect();
-    setInCall(false);
-    setMicMuted(false);
-    setOnHold(false);
-    
-    // Stop hold music if playing
-    if (holdMusicRef.current) {
-      holdMusicRef.current.pause();
-      holdMusicRef.current.currentTime = 0;
+    if (inConference && conferenceName) {
+      // End conference
+      endConference();
     }
+    
+    if (callRef.current) {
+      callRef.current.disconnect();
+    }
+    if (secondCallRef.current) {
+      secondCallRef.current.disconnect();
+    }
+    
+    handleCallDisconnect();
   };
 
   const toggleMic = () => {
@@ -326,10 +377,19 @@ export default function OrbitPhone() {
     setMicMuted(!micMuted);
   };
 
-  const toggleHold = async () => {
+  const toggleHold = async () => {  
     if (!callRef.current) return;
     
-    // Get the call SID from Twilio call parameters
+    if (inConference) {
+      // Hold the entire conference
+      await toggleConferenceHold();
+    } else {
+      // Hold single call
+      await toggleSingleCallHold();
+    }
+  };
+
+  const toggleSingleCallHold = async () => {
     const callSid = callRef.current.parameters.CallSid;
     
     if (!callSid) {
@@ -338,23 +398,19 @@ export default function OrbitPhone() {
     }
     
     if (!onHold) {
-      // Put call on hold
       console.log("📴 Putting call on hold");
       
-      // Mute local microphone
       callRef.current.mute(true);
       setMicMuted(true);
       setOnHold(true);
       setStatus("On Hold");
       
-      // Play hold music locally (for agent to hear)
       if (holdMusicRef.current) {
         holdMusicRef.current.play().catch(err => {
           console.error("Error playing local hold music:", err);
         });
       }
       
-      // Call backend to play hold music to the caller
       try {
         const response = await fetch(HOLD_CONTROL_URL, {
           method: 'POST',
@@ -373,26 +429,21 @@ export default function OrbitPhone() {
         console.log('Hold music started for caller:', result);
       } catch (err) {
         console.error('Error starting hold music:', err);
-        // Even if backend fails, keep local hold state
       }
       
     } else {
-      // Resume call
       console.log("▶️ Resuming call");
       
-      // Unmute local microphone
       callRef.current.mute(false);
       setMicMuted(false);
       setOnHold(false);
       setStatus("Connected");
       
-      // Stop local hold music
       if (holdMusicRef.current) {
         holdMusicRef.current.pause();
         holdMusicRef.current.currentTime = 0;
       }
       
-      // Call backend to stop hold music for the caller
       try {
         const response = await fetch(HOLD_CONTROL_URL, {
           method: 'POST',
@@ -411,8 +462,113 @@ export default function OrbitPhone() {
         console.log('Call resumed for caller:', result);
       } catch (err) {
         console.error('Error resuming call:', err);
-        // Even if backend fails, keep local unhold state
       }
+    }
+  };
+
+  const toggleConferenceHold = async () => {
+    if (!conferenceName) {
+      console.error("No conference name found");
+      return;
+    }
+    
+    if (!onHold) {
+      console.log("📴 Putting conference on hold");
+      
+      // Mute local microphone
+      if (callRef.current) {
+        callRef.current.mute(true);
+      }
+      setMicMuted(true);
+      setOnHold(true);
+      setStatus("Conference On Hold");
+      
+      // Play hold music locally for agent
+      if (holdMusicRef.current) {
+        holdMusicRef.current.play().catch(err => {
+          console.error("Error playing local hold music:", err);
+        });
+      }
+      
+      try {
+        const response = await fetch(CONFERENCE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'hold',
+            conferenceName: conferenceName
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to put conference on hold');
+        }
+        
+        const result = await response.json();
+        console.log('Conference on hold, all participants hear music:', result);
+      } catch (err) {
+        console.error('Error putting conference on hold:', err);
+      }
+      
+    } else {
+      console.log("▶️ Resuming conference");
+      
+      // Unmute local microphone
+      if (callRef.current) {
+        callRef.current.mute(false);
+      }
+      setMicMuted(false);
+      setOnHold(false);
+      setStatus("Conference Active");
+      
+      // Stop local hold music
+      if (holdMusicRef.current) {
+        holdMusicRef.current.pause();
+        holdMusicRef.current.currentTime = 0;
+      }
+      
+      try {
+        const response = await fetch(CONFERENCE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'unhold',
+            conferenceName: conferenceName
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to resume conference');
+        }
+        
+        const result = await response.json();
+        console.log('Conference resumed:', result);
+      } catch (err) {
+        console.error('Error resuming conference:', err);
+      }
+    }
+  };
+
+  const endConference = async () => {
+    if (!conferenceName) return;
+    
+    try {
+      const response = await fetch(CONFERENCE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'end',
+          conferenceName: conferenceName
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to end conference');
+      }
+      
+      console.log('Conference ended');
+    } catch (err) {
+      console.error('Error ending conference:', err);
     }
   };
 
@@ -465,9 +621,37 @@ export default function OrbitPhone() {
         preload="auto"
       >
         <source src="https://firebasestorage.googleapis.com/v0/b/vertexifycx-orbit.firebasestorage.app/o/mixkit-beautiful-dream-493.mp3?alt=media&token=50c5f790-54d2-4732-ae36-d24a39d671c8" type="audio/mpeg" />
-        {/* Alternative: Use a more pleasant hold music URL or host your own */}
-        {/* <source src="YOUR_HOLD_MUSIC_URL.mp3" type="audio/mpeg" /> */}
       </audio>
+
+      {/* Add Call Dialog */}
+      {showAddCallDialog && (
+        <div style={styles.modal} onClick={() => setShowAddCallDialog(false)}>
+          <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalIcon}>
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#667eea" strokeWidth="2">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+              </svg>
+            </div>
+            <h3 style={styles.modalTitle}>Add Call</h3>
+            <p style={styles.modalText}>Enter phone number to add to conference</p>
+            <input
+              type="tel"
+              value={secondCallNumber}
+              onChange={(e) => setSecondCallNumber(e.target.value)}
+              placeholder="+1 (555) 123-4567"
+              style={styles.phoneInput}
+            />
+            <div style={styles.modalActions}>
+              <button style={styles.secondaryBtn} onClick={() => setShowAddCallDialog(false)}>
+                Cancel
+              </button>
+              <button style={styles.primaryBtn} onClick={addCallToConference}>
+                Call
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Audio Enable Modal - Only for inbound mode */}
       {!audioEnabled && !isOutbound && (
@@ -504,7 +688,7 @@ export default function OrbitPhone() {
             </div>
             <div style={styles.statusBadge}>
               <div style={styles.statusDot}></div>
-              <span style={styles.statusLabel}>Online</span>
+              <span style={styles.statusLabel}>{inConference ? "Conference" : "Online"}</span>
             </div>
           </div>
         </div>
@@ -552,12 +736,30 @@ export default function OrbitPhone() {
               <div style={styles.activeCallInfo}>
                 <div style={styles.activeAvatar}>
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                    <circle cx="12" cy="7" r="4"></circle>
+                    {inConference ? (
+                      <>
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="9" cy="7" r="4"></circle>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                      </>
+                    ) : (
+                      <>
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="12" cy="7" r="4"></circle>
+                      </>
+                    )}
                   </svg>
                 </div>
                 <div style={styles.activeCallDetails}>
-                  <div style={styles.activeNumber}>{formatPhoneNumber(phoneNumber)}</div>
+                  <div style={styles.activeNumber}>
+                    {inConference ? "Conference Call" : formatPhoneNumber(phoneNumber)}
+                  </div>
+                  {inConference && secondCallNumber && (
+                    <div style={styles.conferenceParticipants}>
+                      {formatPhoneNumber(phoneNumber)} & {formatPhoneNumber(secondCallNumber)}
+                    </div>
+                  )}
                   <div style={styles.activeStatus}>{status}</div>
                   <div style={styles.activeDuration}>{formatDuration(callDuration)}</div>
                 </div>
@@ -626,6 +828,40 @@ export default function OrbitPhone() {
                   <span style={styles.controlLabel}>{onHold ? "Resume" : "Hold"}</span>
                 </button>
               </div>
+
+              {/* Conference Controls */}
+              {!inConference && (
+                <div style={styles.conferenceControls}>
+                  <button 
+                    style={styles.conferenceBtn} 
+                    onClick={() => setShowAddCallDialog(true)}
+                    disabled={secondCallRef.current !== null}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="8.5" cy="7" r="4"></circle>
+                      <line x1="20" y1="8" x2="20" y2="14"></line>
+                      <line x1="23" y1="11" x2="17" y2="11"></line>
+                    </svg>
+                    Add Call
+                  </button>
+                  
+                  {secondCallRef.current && (
+                    <button 
+                      style={{...styles.conferenceBtn, ...styles.conferenceBtnActive}} 
+                      onClick={startConference}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="9" cy="7" r="4"></circle>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                      </svg>
+                      Merge Calls
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -853,6 +1089,11 @@ const styles = {
     color: "#1e293b",
     letterSpacing: "-0.3px",
   },
+  conferenceParticipants: {
+    fontSize: 13,
+    color: "#64748b",
+    fontWeight: 500,
+  },
   activeStatus: {
     fontSize: 14,
     color: "#64748b",
@@ -914,6 +1155,31 @@ const styles = {
     justifyContent: "center",
     boxShadow: "0 10px 25px rgba(239, 68, 68, 0.4)",
     transition: "all 0.2s ease",
+  },
+  conferenceControls: {
+    display: "flex",
+    gap: 12,
+    marginTop: 24,
+    justifyContent: "center",
+  },
+  conferenceBtn: {
+    padding: "12px 20px",
+    background: "#f1f5f9",
+    color: "#475569",
+    border: "none",
+    borderRadius: 12,
+    fontSize: 14,
+    fontWeight: 600,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    transition: "all 0.2s ease",
+  },
+  conferenceBtnActive: {
+    background: "#10b981",
+    color: "#fff",
+    boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
   },
   // Idle state styles
   idleContainer: {
@@ -1007,8 +1273,22 @@ const styles = {
     marginBottom: 32,
     lineHeight: 1.6,
   },
-  primaryBtn: {
+  phoneInput: {
     width: "100%",
+    padding: "14px 16px",
+    border: "2px solid #e2e8f0",
+    borderRadius: 12,
+    fontSize: 16,
+    marginBottom: 24,
+    fontFamily: "inherit",
+    transition: "border-color 0.2s ease",
+  },
+  modalActions: {
+    display: "flex",
+    gap: 12,
+  },
+  primaryBtn: {
+    flex: 1,
     padding: "16px 24px",
     background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
     color: "#fff",
@@ -1019,6 +1299,18 @@ const styles = {
     cursor: "pointer",
     transition: "all 0.2s ease",
     boxShadow: "0 8px 20px rgba(102, 126, 234, 0.3)",
+  },
+  secondaryBtn: {
+    flex: 1,
+    padding: "16px 24px",
+    background: "#f1f5f9",
+    color: "#475569",
+    border: "none",
+    borderRadius: 16,
+    fontSize: 16,
+    fontWeight: 600,
+    cursor: "pointer",
+    transition: "all 0.2s ease",
   },
 };
 
@@ -1047,6 +1339,11 @@ styleSheet.textContent = `
   button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  
+  input:focus {
+    outline: none;
+    border-color: #667eea;
   }
 `;
 document.head.appendChild(styleSheet);
