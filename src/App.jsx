@@ -6,6 +6,10 @@ const TOKEN_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 const VERIFY_ACCESS_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
+const CONFERENCE_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/conferenceCall";
+const ADD_PARTICIPANT_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/addParticipant";
 
 export default function OrbitPhone() {
   const deviceRef = useRef(null);
@@ -20,6 +24,14 @@ export default function OrbitPhone() {
   const [authChecked, setAuthChecked] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [callDuration, setCallDuration] = useState(0);
+  
+  // Conference-related state
+  const [isConference, setIsConference] = useState(false);
+  const [conferenceName, setConferenceName] = useState("");
+  const [participants, setParticipants] = useState([]);
+  const [showAddParticipant, setShowAddParticipant] = useState(false);
+  const [newParticipantNumber, setNewParticipantNumber] = useState("");
+  const [callSid, setCallSid] = useState("");
 
   // --- URL params
   const params = new URLSearchParams(window.location.search);
@@ -94,7 +106,7 @@ export default function OrbitPhone() {
 
         // Initialize Twilio Device with enableRingingState
         const device = new Device(token, {
-          enableRingingState: true, // This is KEY for hearing outbound ringing!
+          enableRingingState: true,
           closeProtection: true,
         });
         deviceRef.current = device;
@@ -103,9 +115,16 @@ export default function OrbitPhone() {
         device.on("incoming", (call) => {
           console.log("📞 Incoming call received:", call.parameters);
           callRef.current = call;
+          setCallSid(call.parameters.CallSid);
           setIncoming(true);
           setPhoneNumber(call.parameters.From || "Unknown");
           setStatus("Incoming call...");
+
+          // Check if this is a conference call
+          if (call.customParameters?.get('conferenceMode') === 'true') {
+            setIsConference(true);
+            setConferenceName(call.customParameters.get('conferenceName') || '');
+          }
 
           // When call is accepted
           call.on("accept", () => {
@@ -115,51 +134,31 @@ export default function OrbitPhone() {
             setStatus("Connected");
           });
 
-          // When caller hangs up (either during ringing or after connected)
+          // When caller hangs up
           call.on("disconnect", () => {
             console.log("📴 Call disconnected");
-            setIncoming(false);
-            setInCall(false);
-            setMicMuted(false);
-            callRef.current = null;
-            setStatus("Call ended");
-            setPhoneNumber("");
-            setTimeout(() => setStatus("Ready"), 2000);
+            resetCallState();
           });
 
-          // When caller cancels (hangs up during ringing before you answer)
+          // When caller cancels
           call.on("cancel", () => {
             console.log("❌ Call cancelled by caller");
-            setIncoming(false);
-            setInCall(false);
-            setMicMuted(false);
-            callRef.current = null;
             setStatus("Missed call");
-            setPhoneNumber("");
-            setTimeout(() => setStatus("Ready"), 2000);
+            resetCallState();
           });
 
           // When you reject the call
           call.on("reject", () => {
             console.log("🚫 Call rejected");
-            setIncoming(false);
-            setInCall(false);
-            setMicMuted(false);
-            callRef.current = null;
             setStatus("Call rejected");
-            setPhoneNumber("");
-            setTimeout(() => setStatus("Ready"), 2000);
+            resetCallState();
           });
 
           // Error handling
           call.on("error", (err) => {
             console.error("⚠️ Call error:", err);
             setStatus(`Error: ${err.message}`);
-            setIncoming(false);
-            setInCall(false);
-            callRef.current = null;
-            setPhoneNumber("");
-            setTimeout(() => setStatus("Ready"), 2000);
+            resetCallState();
           });
         });
 
@@ -173,7 +172,6 @@ export default function OrbitPhone() {
           setPhoneNumber(toNumber);
           setTimeout(() => makeOutbound(toNumber), 200);
         }
-        // For inbound, don't auto-enable - let user enable to hear ringing
       } catch (err) {
         setStatus(`Setup failed: ${err.message}`);
       }
@@ -182,8 +180,23 @@ export default function OrbitPhone() {
     initDevice();
   }, [agentId, isOutbound]);
 
-  // --- Outbound call
-  const makeOutbound = async (number = phoneNumber) => {
+  // Reset call state helper
+  const resetCallState = () => {
+    setIncoming(false);
+    setInCall(false);
+    setMicMuted(false);
+    setIsConference(false);
+    setConferenceName("");
+    setParticipants([]);
+    setShowAddParticipant(false);
+    setCallSid("");
+    callRef.current = null;
+    setPhoneNumber("");
+    setTimeout(() => setStatus("Ready"), 2000);
+  };
+
+  // --- Outbound call (regular or conference)
+  const makeOutbound = async (number = phoneNumber, asConference = false) => {
     if (!deviceRef.current) {
       setStatus("Device not ready");
       return;
@@ -197,31 +210,41 @@ export default function OrbitPhone() {
     setStatus(`Calling ${number}...`);
 
     try {
-      const call = await deviceRef.current.connect({
-        params: { To: number, From: fromNumber || "+1234567890" },
-      });
+      const params = {
+        To: number,
+        From: fromNumber || "+1234567890"
+      };
 
+      // If starting as conference, pass conference parameters
+      if (asConference) {
+        const confName = `conf_${agentId}_${Date.now()}`;
+        params.conferenceMode = "true";
+        params.conferenceName = confName;
+        setIsConference(true);
+        setConferenceName(confName);
+      }
+
+      const call = await deviceRef.current.connect({ params });
       callRef.current = call;
       setInCall(true);
 
-      // Listen for ringing event - this is when the ringtone should play
+      // Store call SID from call parameters when available
+      call.on("accept", () => {
+        console.log("✅ Call connected");
+        setStatus("Connected");
+        if (call.parameters?.CallSid) {
+          setCallSid(call.parameters.CallSid);
+        }
+      });
+
       call.on("ringing", () => {
         console.log("📞 Ringing...");
         setStatus("Ringing...");
       });
 
-      call.on("accept", () => {
-        console.log("✅ Call connected");
-        setStatus("Connected");
-      });
-
       call.on("disconnect", () => {
         console.log("📴 Call ended");
-        setInCall(false);
-        setMicMuted(false);
-        callRef.current = null;
-        setStatus("Call ended");
-        setPhoneNumber("");
+        resetCallState();
         if (isOutbound) setTimeout(() => window.close(), 1000);
       });
 
@@ -233,6 +256,71 @@ export default function OrbitPhone() {
     } catch (err) {
       setStatus(`Connection failed: ${err.message}`);
       setInCall(false);
+    }
+  };
+
+  // --- Start conference from active call
+  const startConference = async () => {
+    if (!callRef.current) return;
+    
+    try {
+      setStatus("Converting to conference...");
+      const confName = `conf_${agentId}_${Date.now()}`;
+      
+      // You would need to implement this endpoint to convert an active call to conference
+      // This typically requires hanging up and restarting as a conference call
+      await makeOutbound(phoneNumber, true);
+      
+      setIsConference(true);
+      setConferenceName(confName);
+      setStatus("Conference started");
+    } catch (err) {
+      console.error("Failed to start conference:", err);
+      setStatus("Failed to start conference");
+    }
+  };
+
+  // --- Add participant to conference
+  const addParticipant = async () => {
+    if (!newParticipantNumber || !conferenceName) {
+      alert("Please enter a phone number");
+      return;
+    }
+
+    try {
+      setStatus("Adding participant...");
+      
+      const response = await fetch(ADD_PARTICIPANT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conferenceName: conferenceName,
+          participantNumber: newParticipantNumber,
+          fromNumber: fromNumber || "+1234567890",
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to add participant");
+      }
+
+      const data = await response.json();
+      
+      setParticipants([...participants, {
+        number: newParticipantNumber,
+        sid: data.callSid,
+        status: "calling"
+      }]);
+      
+      setNewParticipantNumber("");
+      setShowAddParticipant(false);
+      setStatus("Participant added");
+      
+      setTimeout(() => setStatus("Connected"), 2000);
+    } catch (err) {
+      console.error("Failed to add participant:", err);
+      alert("Failed to add participant: " + err.message);
+      setStatus("Connected");
     }
   };
 
@@ -248,17 +336,14 @@ export default function OrbitPhone() {
   const reject = () => {
     if (!callRef.current) return;
     callRef.current.reject();
-    setIncoming(false);
-    setInCall(false);
+    resetCallState();
     setStatus("Call rejected");
-    setPhoneNumber("");
   };
 
   const hangup = () => {
     if (!callRef.current) return;
     callRef.current.disconnect();
-    setInCall(false);
-    setMicMuted(false);
+    resetCallState();
   };
 
   const toggleMic = () => {
@@ -309,7 +394,7 @@ export default function OrbitPhone() {
 
   return (
     <div style={styles.page}>
-      {/* Audio Enable Modal - Only for inbound mode */}
+      {/* Audio Enable Modal */}
       {!audioEnabled && !isOutbound && (
         <div style={styles.modal}>
           <div style={styles.modalCard}>
@@ -332,6 +417,44 @@ export default function OrbitPhone() {
         </div>
       )}
 
+      {/* Add Participant Modal */}
+      {showAddParticipant && (
+        <div style={styles.modal}>
+          <div style={styles.modalCard}>
+            <div style={styles.modalIcon}>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#667eea" strokeWidth="2">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="8.5" cy="7" r="4"></circle>
+                <line x1="20" y1="8" x2="20" y2="14"></line>
+                <line x1="23" y1="11" x2="17" y2="11"></line>
+              </svg>
+            </div>
+            <h3 style={styles.modalTitle}>Add Participant</h3>
+            <input
+              type="tel"
+              placeholder="+1 (555) 000-0000"
+              value={newParticipantNumber}
+              onChange={(e) => setNewParticipantNumber(e.target.value)}
+              style={styles.input}
+            />
+            <div style={styles.modalActions}>
+              <button
+                style={styles.secondaryBtn}
+                onClick={() => {
+                  setShowAddParticipant(false);
+                  setNewParticipantNumber("");
+                }}
+              >
+                Cancel
+              </button>
+              <button style={styles.primaryBtn} onClick={addParticipant}>
+                Add to Call
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={styles.phone}>
         {/* Header */}
         <div style={styles.header}>
@@ -344,7 +467,9 @@ export default function OrbitPhone() {
             </div>
             <div style={styles.statusBadge}>
               <div style={styles.statusDot}></div>
-              <span style={styles.statusLabel}>Online</span>
+              <span style={styles.statusLabel}>
+                {isConference ? "Conference" : "Online"}
+              </span>
             </div>
           </div>
         </div>
@@ -364,7 +489,9 @@ export default function OrbitPhone() {
                   </div>
                 </div>
                 <div style={styles.callerDetails}>
-                  <div style={styles.callerLabel}>Incoming Call</div>
+                  <div style={styles.callerLabel}>
+                    {isConference ? "Conference Call" : "Incoming Call"}
+                  </div>
                   <div style={styles.callerNumber}>{formatPhoneNumber(phoneNumber)}</div>
                 </div>
               </div>
@@ -391,16 +518,46 @@ export default function OrbitPhone() {
             <div style={styles.activeCallContainer}>
               <div style={styles.activeCallInfo}>
                 <div style={styles.activeAvatar}>
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                    <circle cx="12" cy="7" r="4"></circle>
-                  </svg>
+                  {isConference ? (
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                      <path d="M17 21v-2a4 4 0 0 0-3-3.87"></path>
+                      <path d="M9 21v-2a4 4 0 0 1 3-3.87"></path>
+                      <circle cx="9" cy="7" r="4"></circle>
+                      <circle cx="17" cy="7" r="4"></circle>
+                    </svg>
+                  ) : (
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                  )}
                 </div>
                 <div style={styles.activeCallDetails}>
-                  <div style={styles.activeNumber}>{formatPhoneNumber(phoneNumber)}</div>
+                  <div style={styles.activeNumber}>
+                    {isConference
+                      ? `Conference (${participants.length + 1} participants)`
+                      : formatPhoneNumber(phoneNumber)}
+                  </div>
                   <div style={styles.activeStatus}>{status}</div>
                   <div style={styles.activeDuration}>{formatDuration(callDuration)}</div>
                 </div>
+
+                {/* Participants List */}
+                {isConference && participants.length > 0 && (
+                  <div style={styles.participantsList}>
+                    {participants.map((participant, index) => (
+                      <div key={index} style={styles.participantItem}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2">
+                          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                          <circle cx="12" cy="7" r="4"></circle>
+                        </svg>
+                        <span style={styles.participantNumber}>
+                          {formatPhoneNumber(participant.number)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div style={styles.callControls}>
@@ -438,15 +595,27 @@ export default function OrbitPhone() {
                   </svg>
                 </button>
 
-                <button style={styles.controlBtn}>
+                <button
+                  style={styles.controlBtn}
+                  onClick={() => {
+                    if (isConference) {
+                      setShowAddParticipant(true);
+                    } else {
+                      startConference();
+                    }
+                  }}
+                >
                   <div style={styles.controlIconContainer}>
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="12" cy="12" r="10"></circle>
-                      <line x1="12" y1="8" x2="12" y2="12"></line>
-                      <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                      <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="8.5" cy="7" r="4"></circle>
+                      <line x1="20" y1="8" x2="20" y2="14"></line>
+                      <line x1="23" y1="11" x2="17" y2="11"></line>
                     </svg>
                   </div>
-                  <span style={styles.controlLabel}>Hold</span>
+                  <span style={styles.controlLabel}>
+                    {isConference ? "Add" : "Conf"}
+                  </span>
                 </button>
               </div>
             </div>
@@ -551,7 +720,6 @@ const styles = {
     justifyContent: "center",
     padding: 60,
   },
-  // Incoming call styles
   incomingContainer: {
     padding: "60px 32px",
     display: "flex",
@@ -642,7 +810,6 @@ const styles = {
     boxShadow: "0 8px 20px rgba(239, 68, 68, 0.3)",
     transition: "all 0.2s ease",
   },
-  // Active call styles
   activeCallContainer: {
     padding: "48px 32px",
     display: "flex",
@@ -686,6 +853,27 @@ const styles = {
     fontWeight: 600,
     color: "#667eea",
     marginTop: 4,
+  },
+  participantsList: {
+    marginTop: 24,
+    padding: "16px",
+    background: "#f8fafc",
+    borderRadius: 12,
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+    maxHeight: 120,
+    overflowY: "auto",
+  },
+  participantItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 14,
+    color: "#475569",
+  },
+  participantNumber: {
+    fontWeight: 500,
   },
   callControls: {
     display: "flex",
@@ -738,7 +926,6 @@ const styles = {
     boxShadow: "0 10px 25px rgba(239, 68, 68, 0.4)",
     transition: "all 0.2s ease",
   },
-  // Idle state styles
   idleContainer: {
     padding: "80px 32px",
     textAlign: "center",
@@ -764,7 +951,6 @@ const styles = {
     color: "#64748b",
     fontWeight: 500,
   },
-  // Loading & Error states
   loader: {
     width: 56,
     height: 56,
@@ -792,7 +978,6 @@ const styles = {
     fontSize: 15,
     color: "#64748b",
   },
-  // Modal styles
   modal: {
     position: "fixed",
     inset: 0,
@@ -830,8 +1015,22 @@ const styles = {
     marginBottom: 32,
     lineHeight: 1.6,
   },
-  primaryBtn: {
+  input: {
     width: "100%",
+    padding: "14px 16px",
+    border: "2px solid #e2e8f0",
+    borderRadius: 12,
+    fontSize: 16,
+    marginBottom: 24,
+    outline: "none",
+    transition: "border-color 0.2s ease",
+  },
+  modalActions: {
+    display: "flex",
+    gap: 12,
+  },
+  primaryBtn: {
+    flex: 1,
     padding: "16px 24px",
     background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
     color: "#fff",
@@ -842,6 +1041,18 @@ const styles = {
     cursor: "pointer",
     transition: "all 0.2s ease",
     boxShadow: "0 8px 20px rgba(102, 126, 234, 0.3)",
+  },
+  secondaryBtn: {
+    flex: 1,
+    padding: "16px 24px",
+    background: "#f1f5f9",
+    color: "#475569",
+    border: "none",
+    borderRadius: 16,
+    fontSize: 16,
+    fontWeight: 600,
+    cursor: "pointer",
+    transition: "all 0.2s ease",
   },
 };
 
@@ -870,6 +1081,10 @@ styleSheet.textContent = `
   button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  input:focus {
+    border-color: #667eea;
   }
 `;
 document.head.appendChild(styleSheet);
