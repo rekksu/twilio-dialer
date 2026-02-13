@@ -10,7 +10,6 @@ const VERIFY_ACCESS_URL =
 export default function OrbitPhone() {
   const deviceRef = useRef(null);
   const callRef = useRef(null);
-  const audioRef = useRef(null);
 
   const [status, setStatus] = useState("Initializing…");
   const [incoming, setIncoming] = useState(false);
@@ -89,21 +88,16 @@ export default function OrbitPhone() {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         stream.getTracks().forEach((t) => t.stop());
 
-        // Audio element for incoming audio
-        audioRef.current = new Audio();
-        audioRef.current.autoplay = true;
-
         // Get Twilio token
         const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
         const { token } = await res.json();
 
-        // Initialize Twilio Device
+        // Initialize Twilio Device with enableRingingState
         const device = new Device(token, {
-          enableRingingState: true,
+          enableRingingState: true, // This is KEY for hearing outbound ringing!
           closeProtection: true,
         });
         deviceRef.current = device;
-        device.audio.incoming(audioRef.current);
 
         // Incoming calls
         device.on("incoming", (call) => {
@@ -210,11 +204,19 @@ export default function OrbitPhone() {
       callRef.current = call;
       setInCall(true);
 
+      // Listen for ringing event - this is when the ringtone should play
+      call.on("ringing", () => {
+        console.log("📞 Ringing...");
+        setStatus("Ringing...");
+      });
+
       call.on("accept", () => {
+        console.log("✅ Call connected");
         setStatus("Connected");
       });
 
       call.on("disconnect", () => {
+        console.log("📴 Call ended");
         setInCall(false);
         setMicMuted(false);
         callRef.current = null;
@@ -224,6 +226,7 @@ export default function OrbitPhone() {
       });
 
       call.on("error", (err) => {
+        console.error("⚠️ Call error:", err);
         setStatus(`Call failed: ${err.message}`);
         setInCall(false);
       });
