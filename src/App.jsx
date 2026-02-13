@@ -62,6 +62,14 @@ export default function OrbitPhone() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
+  // Debug: Track conference state changes
+  useEffect(() => {
+    console.log("🔄 Conference state changed:");
+    console.log("- isConference:", isConference);
+    console.log("- conferenceName:", conferenceName);
+    console.log("- showAddParticipant:", showAddParticipant);
+  }, [isConference, conferenceName, showAddParticipant]);
+
   // --- Verify access
   useEffect(() => {
     const verify = async () => {
@@ -260,20 +268,32 @@ export default function OrbitPhone() {
   };
 
   // --- Start conference from active call
-  const startConference = async () => {
-    if (!callRef.current) return;
+  const startConference = () => {
+    console.log("=== startConference called ===");
+    console.log("callRef.current:", callRef.current);
+    console.log("phoneNumber:", phoneNumber);
+    
+    if (!callRef.current || !phoneNumber) {
+      console.log("Cannot start conference - missing call or phone number");
+      return;
+    }
     
     try {
-      setStatus("Converting to conference...");
+      // Generate unique conference name
       const confName = `conf_${agentId}_${Date.now()}`;
       
-      // You would need to implement this endpoint to convert an active call to conference
-      // This typically requires hanging up and restarting as a conference call
-      await makeOutbound(phoneNumber, true);
+      console.log("Setting conference state:");
+      console.log("- conferenceName:", confName);
+      console.log("- isConference: true");
       
+      // Set conference state immediately
       setIsConference(true);
       setConferenceName(confName);
-      setStatus("Conference started");
+      setStatus("Conference mode activated");
+      
+      console.log("Conference started successfully!");
+      console.log("Button should now show 'Add' instead of 'Conf'");
+      
     } catch (err) {
       console.error("Failed to start conference:", err);
       setStatus("Failed to start conference");
@@ -598,9 +618,15 @@ export default function OrbitPhone() {
                 <button
                   style={styles.controlBtn}
                   onClick={() => {
+                    console.log("Conference button clicked");
+                    console.log("isConference:", isConference);
+                    console.log("conferenceName:", conferenceName);
+                    
                     if (isConference) {
+                      console.log("Opening add participant modal");
                       setShowAddParticipant(true);
                     } else {
+                      console.log("Starting conference");
                       startConference();
                     }
                   }}
