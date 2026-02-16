@@ -18,6 +18,7 @@ export default function OrbitPhone() {
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
   const [onHold, setOnHold] = useState(false);
+  const [showKeypad, setShowKeypad] = useState(false); // 🆕 DTMF Keypad
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -64,6 +65,14 @@ export default function OrbitPhone() {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  // 🆕 DTMF function to send digits
+  const sendDTMF = (digit) => {
+    if (callRef.current) {
+      callRef.current.sendDigits(digit);
+      console.log("📞 Sent DTMF:", digit);
+    }
   };
 
   // --- Verify access
@@ -138,6 +147,7 @@ export default function OrbitPhone() {
             setInCall(false);
             setMicMuted(false);
             setOnHold(false);
+            setShowKeypad(false); // 🆕 Close keypad
             if (holdMusicRef.current) {
               holdMusicRef.current.pause();
               holdMusicRef.current.currentTime = 0;
@@ -155,6 +165,7 @@ export default function OrbitPhone() {
             setInCall(false);
             setMicMuted(false);
             setOnHold(false);
+            setShowKeypad(false); // 🆕 Close keypad
             callRef.current = null;
             setStatus("Missed call");
             setPhoneNumber("");
@@ -168,6 +179,7 @@ export default function OrbitPhone() {
             setInCall(false);
             setMicMuted(false);
             setOnHold(false);
+            setShowKeypad(false); // 🆕 Close keypad
             callRef.current = null;
             setStatus("Call rejected");
             setPhoneNumber("");
@@ -181,6 +193,7 @@ export default function OrbitPhone() {
             setIncoming(false);
             setInCall(false);
             setOnHold(false);
+            setShowKeypad(false); // 🆕 Close keypad
             callRef.current = null;
             setPhoneNumber("");
             setTimeout(() => setStatus("Ready"), 2000);
@@ -242,6 +255,7 @@ export default function OrbitPhone() {
         setInCall(false);
         setMicMuted(false);
         setOnHold(false);
+        setShowKeypad(false); // 🆕 Close keypad
         if (holdMusicRef.current) {
           holdMusicRef.current.pause();
           holdMusicRef.current.currentTime = 0;
@@ -257,11 +271,13 @@ export default function OrbitPhone() {
         setStatus(`Call failed: ${err.message}`);
         setInCall(false);
         setOnHold(false);
+        setShowKeypad(false); // 🆕 Close keypad
       });
     } catch (err) {
       setStatus(`Connection failed: ${err.message}`);
       setInCall(false);
       setOnHold(false);
+      setShowKeypad(false); // 🆕 Close keypad
     }
   };
 
@@ -296,6 +312,7 @@ export default function OrbitPhone() {
     setInCall(false);
     setMicMuted(false);
     setOnHold(false);
+    setShowKeypad(false); // 🆕 Close keypad
   };
 
   const toggleMic = () => {
@@ -350,6 +367,11 @@ export default function OrbitPhone() {
       
       setStatus("Connected");
     }
+  };
+
+  // 🆕 Toggle DTMF Keypad
+  const toggleKeypad = () => {
+    setShowKeypad(!showKeypad);
   };
 
   // Format phone number for display
@@ -546,6 +568,25 @@ export default function OrbitPhone() {
                   <span style={styles.controlLabel}>{onHold ? "Resume" : "Hold"}</span>
                 </button>
               </div>
+
+              {/* 🆕 Secondary Controls Row with Keypad */}
+              <div style={styles.secondaryControls}>
+                <button
+                  style={{
+                    ...styles.secondaryControlBtn,
+                    ...(showKeypad ? styles.secondaryControlBtnActive : {}),
+                  }}
+                  onClick={toggleKeypad}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="3" width="7" height="7"></rect>
+                    <rect x="3" y="14" width="7" height="7"></rect>
+                    <rect x="14" y="14" width="7" height="7"></rect>
+                  </svg>
+                  <span style={styles.secondaryControlLabel}>Keypad</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -562,6 +603,48 @@ export default function OrbitPhone() {
             </div>
           )}
         </div>
+
+        {/* 🆕 DTMF Keypad Modal */}
+        {showKeypad && inCall && (
+          <div style={styles.keypadModal} onClick={() => setShowKeypad(false)}>
+            <div style={styles.keypadContainer} onClick={(e) => e.stopPropagation()}>
+              <div style={styles.keypadHeader}>
+                <h3 style={styles.keypadTitle}>Dialpad</h3>
+                <button style={styles.keypadCloseBtn} onClick={() => setShowKeypad(false)}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </button>
+              </div>
+              <div style={styles.keypadGrid}>
+                {[
+                  { digit: "1", letters: "" },
+                  { digit: "2", letters: "ABC" },
+                  { digit: "3", letters: "DEF" },
+                  { digit: "4", letters: "GHI" },
+                  { digit: "5", letters: "JKL" },
+                  { digit: "6", letters: "MNO" },
+                  { digit: "7", letters: "PQRS" },
+                  { digit: "8", letters: "TUV" },
+                  { digit: "9", letters: "WXYZ" },
+                  { digit: "*", letters: "" },
+                  { digit: "0", letters: "+" },
+                  { digit: "#", letters: "" },
+                ].map(({ digit, letters }) => (
+                  <button
+                    key={digit}
+                    style={styles.keypadBtn}
+                    onClick={() => sendDTMF(digit)}
+                  >
+                    <span style={styles.keypadDigit}>{digit}</span>
+                    {letters && <span style={styles.keypadLetters}>{letters}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -594,6 +677,7 @@ const styles = {
     overflow: "hidden",
     display: "flex",
     flexDirection: "column",
+    position: "relative",
   },
   header: {
     background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
@@ -741,7 +825,7 @@ const styles = {
   },
   // Active call styles
   activeCallContainer: {
-    padding: "48px 32px",
+    padding: "48px 32px 32px",
     display: "flex",
     flexDirection: "column",
     flex: 1,
@@ -789,6 +873,7 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     gap: 20,
+    marginBottom: 20,
   },
   controlBtn: {
     width: 80,
@@ -834,6 +919,109 @@ const styles = {
     justifyContent: "center",
     boxShadow: "0 10px 25px rgba(239, 68, 68, 0.4)",
     transition: "all 0.2s ease",
+  },
+  // 🆕 Secondary Controls (Keypad button row)
+  secondaryControls: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 12,
+  },
+  secondaryControlBtn: {
+    padding: "12px 20px",
+    background: "#f1f5f9",
+    border: "none",
+    borderRadius: 12,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+  },
+  secondaryControlBtnActive: {
+    background: "#667eea",
+    color: "#fff",
+  },
+  secondaryControlLabel: {
+    fontSize: 14,
+    fontWeight: 600,
+    color: "#475569",
+  },
+  // 🆕 DTMF Keypad Modal Styles
+  keypadModal: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: "rgba(0, 0, 0, 0.7)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1000,
+    borderRadius: 32,
+    backdropFilter: "blur(4px)",
+  },
+  keypadContainer: {
+    background: "#fff",
+    borderRadius: 24,
+    padding: "24px",
+    width: "90%",
+    maxWidth: 340,
+    boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+  },
+  keypadHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 20,
+  },
+  keypadTitle: {
+    fontSize: 20,
+    fontWeight: 600,
+    color: "#1e293b",
+    margin: 0,
+  },
+  keypadCloseBtn: {
+    width: 36,
+    height: 36,
+    background: "#f1f5f9",
+    border: "none",
+    borderRadius: "50%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+  },
+  keypadGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: 16,
+  },
+  keypadBtn: {
+    aspectRatio: "1",
+    background: "#f1f5f9",
+    border: "none",
+    borderRadius: 16,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+    padding: "20px",
+  },
+  keypadDigit: {
+    fontSize: 28,
+    fontWeight: 600,
+    color: "#1e293b",
+  },
+  keypadLetters: {
+    fontSize: 11,
+    fontWeight: 500,
+    color: "#64748b",
+    marginTop: 2,
+    letterSpacing: "0.5px",
   },
   // Idle state styles
   idleContainer: {
@@ -967,6 +1155,24 @@ styleSheet.textContent = `
   button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .keypadBtn:hover {
+    background: #667eea !important;
+    color: #fff;
+  }
+
+  .keypadBtn:hover .keypadDigit,
+  .keypadBtn:hover .keypadLetters {
+    color: #fff;
+  }
+
+  .keypadCloseBtn:hover {
+    background: #e2e8f0 !important;
+  }
+
+  .secondaryControlBtnActive .secondaryControlLabel {
+    color: #fff !important;
   }
 `;
 document.head.appendChild(styleSheet);
