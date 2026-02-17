@@ -12,6 +12,7 @@
   "dependencies": {
     "@twilio/voice-sdk": "^2.18.0",
     "axios": "^1.13.2",
+    "firebase": "^12.9.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
