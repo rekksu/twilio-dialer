@@ -53,6 +53,8 @@ export default function OrbitPhone() {
   // Fetch recording settings from Firestore
   useEffect(() => {
     const fetchRecordingSettings = async () => {
+      // For outbound calls, use fromNumber
+      // For inbound calls, we'll get it from the Twilio device identity later
       if (!fromNumber) return;
 
       try {
@@ -64,6 +66,8 @@ export default function OrbitPhone() {
           const data = phoneDoc.data();
           setRecordingEnabled(data.recording === true);
           console.log(`📹 Recording enabled for ${fromNumber}:`, data.recording);
+        } else {
+          console.log(`📹 No phone_numbers document found for ${fromNumber}`);
         }
       } catch (error) {
         console.error("Error fetching recording settings:", error);
@@ -275,10 +279,8 @@ export default function OrbitPhone() {
         },
       };
 
-      // Add recording parameter if enabled
-      if (recordingEnabled) {
-        connectParams.params.Record = "true";
-      }
+      // Backend will handle recording based on Firestore settings
+      // No need to pass Record parameter from frontend
 
       const call = await deviceRef.current.connect(connectParams);
 
