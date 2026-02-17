@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
+import { getFirestore, doc, getDoc } from "firebase/firestore";
 
 // URLs for your backend Cloud Functions
 const TOKEN_URL =
@@ -18,11 +19,13 @@ export default function OrbitPhone() {
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
   const [onHold, setOnHold] = useState(false);
-  const [showKeypad, setShowKeypad] = useState(false); // 🆕 DTMF Keypad
+  const [showKeypad, setShowKeypad] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [callDuration, setCallDuration] = useState(0);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingEnabled, setRecordingEnabled] = useState(false);
 
   // --- URL params
   const params = new URLSearchParams(window.location.search);
@@ -35,8 +38,6 @@ export default function OrbitPhone() {
 
   // Initialize hold music audio element
   useEffect(() => {
-    // Create an audio element for hold music
-    // Using a royalty-free hold music URL or you can host your own
     holdMusicRef.current = new Audio("https://www.twilio.com/docs/voice/twiml/play/hold-music.mp3");
     holdMusicRef.current.loop = true;
     holdMusicRef.current.volume = 0.3;
@@ -48,6 +49,29 @@ export default function OrbitPhone() {
       }
     };
   }, []);
+
+  // Fetch recording settings from Firestore
+  useEffect(() => {
+    const fetchRecordingSettings = async () => {
+      if (!fromNumber) return;
+
+      try {
+        const db = getFirestore();
+        const phoneDocRef = doc(db, "phone_numbers", fromNumber);
+        const phoneDoc = await getDoc(phoneDocRef);
+
+        if (phoneDoc.exists()) {
+          const data = phoneDoc.data();
+          setRecordingEnabled(data.recording === true);
+          console.log(`📹 Recording enabled for ${fromNumber}:`, data.recording);
+        }
+      } catch (error) {
+        console.error("Error fetching recording settings:", error);
+      }
+    };
+
+    fetchRecordingSettings();
+  }, [fromNumber]);
 
   // Call duration timer
   useEffect(() => {
@@ -67,7 +91,7 @@ export default function OrbitPhone() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // 🆕 DTMF function to send digits
+  // DTMF function to send digits
   const sendDTMF = (digit) => {
     if (callRef.current) {
       callRef.current.sendDigits(digit);
@@ -138,6 +162,12 @@ export default function OrbitPhone() {
             setIncoming(false);
             setInCall(true);
             setStatus("Connected");
+            
+            // Set recording status based on settings
+            if (recordingEnabled) {
+              setIsRecording(true);
+              console.log("🔴 Recording started");
+            }
           });
 
           // When caller hangs up (either during ringing or after connected)
@@ -147,7 +177,8 @@ export default function OrbitPhone() {
             setInCall(false);
             setMicMuted(false);
             setOnHold(false);
-            setShowKeypad(false); // 🆕 Close keypad
+            setShowKeypad(false);
+            setIsRecording(false);
             if (holdMusicRef.current) {
               holdMusicRef.current.pause();
               holdMusicRef.current.currentTime = 0;
@@ -155,6 +186,7 @@ export default function OrbitPhone() {
             callRef.current = null;
             setStatus("Call ended");
             setPhoneNumber("");
+            setCallDuration(0);
             setTimeout(() => setStatus("Ready"), 2000);
           });
 
@@ -165,7 +197,8 @@ export default function OrbitPhone() {
             setInCall(false);
             setMicMuted(false);
             setOnHold(false);
-            setShowKeypad(false); // 🆕 Close keypad
+            setShowKeypad(false);
+            setIsRecording(false);
             callRef.current = null;
             setStatus("Missed call");
             setPhoneNumber("");
@@ -179,7 +212,8 @@ export default function OrbitPhone() {
             setInCall(false);
             setMicMuted(false);
             setOnHold(false);
-            setShowKeypad(false); // 🆕 Close keypad
+            setShowKeypad(false);
+            setIsRecording(false);
             callRef.current = null;
             setStatus("Call rejected");
             setPhoneNumber("");
@@ -193,7 +227,8 @@ export default function OrbitPhone() {
             setIncoming(false);
             setInCall(false);
             setOnHold(false);
-            setShowKeypad(false); // 🆕 Close keypad
+            setShowKeypad(false);
+            setIsRecording(false);
             callRef.current = null;
             setPhoneNumber("");
             setTimeout(() => setStatus("Ready"), 2000);
@@ -233,9 +268,19 @@ export default function OrbitPhone() {
     setStatus(`Calling ${number}...`);
 
     try {
-      const call = await deviceRef.current.connect({
-        params: { To: number, From: fromNumber || "+1234567890" },
-      });
+      const connectParams = {
+        params: { 
+          To: number, 
+          From: fromNumber || "+1234567890"
+        },
+      };
+
+      // Add recording parameter if enabled
+      if (recordingEnabled) {
+        connectParams.params.Record = "true";
+      }
+
+      const call = await deviceRef.current.connect(connectParams);
 
       callRef.current = call;
       setInCall(true);
@@ -248,6 +293,12 @@ export default function OrbitPhone() {
       call.on("accept", () => {
         console.log("✅ Call connected");
         setStatus("Connected");
+        
+        // Set recording status based on settings
+        if (recordingEnabled) {
+          setIsRecording(true);
+          console.log("🔴 Recording started");
+        }
       });
 
       call.on("disconnect", () => {
@@ -255,7 +306,8 @@ export default function OrbitPhone() {
         setInCall(false);
         setMicMuted(false);
         setOnHold(false);
-        setShowKeypad(false); // 🆕 Close keypad
+        setShowKeypad(false);
+        setIsRecording(false);
         if (holdMusicRef.current) {
           holdMusicRef.current.pause();
           holdMusicRef.current.currentTime = 0;
@@ -263,6 +315,7 @@ export default function OrbitPhone() {
         callRef.current = null;
         setStatus("Call ended");
         setPhoneNumber("");
+        setCallDuration(0);
         if (isOutbound) setTimeout(() => window.close(), 1000);
       });
 
@@ -271,13 +324,15 @@ export default function OrbitPhone() {
         setStatus(`Call failed: ${err.message}`);
         setInCall(false);
         setOnHold(false);
-        setShowKeypad(false); // 🆕 Close keypad
+        setShowKeypad(false);
+        setIsRecording(false);
       });
     } catch (err) {
       setStatus(`Connection failed: ${err.message}`);
       setInCall(false);
       setOnHold(false);
-      setShowKeypad(false); // 🆕 Close keypad
+      setShowKeypad(false);
+      setIsRecording(false);
     }
   };
 
@@ -312,7 +367,8 @@ export default function OrbitPhone() {
     setInCall(false);
     setMicMuted(false);
     setOnHold(false);
-    setShowKeypad(false); // 🆕 Close keypad
+    setShowKeypad(false);
+    setIsRecording(false);
   };
 
   const toggleMic = () => {
@@ -336,7 +392,6 @@ export default function OrbitPhone() {
       setMicMuted(true);
       
       // Send custom parameters to Twilio to trigger hold music on their end
-      // Note: This requires TwiML configuration on the backend
       try {
         callRef.current.sendDigits("*");
       } catch (err) {
@@ -369,7 +424,7 @@ export default function OrbitPhone() {
     }
   };
 
-  // 🆕 Toggle DTMF Keypad
+  // Toggle DTMF Keypad
   const toggleKeypad = () => {
     setShowKeypad(!showKeypad);
   };
@@ -507,6 +562,14 @@ export default function OrbitPhone() {
                   <div style={styles.activeNumber}>{formatPhoneNumber(phoneNumber)}</div>
                   <div style={styles.activeStatus}>{status}</div>
                   <div style={styles.activeDuration}>{formatDuration(callDuration)}</div>
+                  
+                  {/* Recording Indicator */}
+                  {isRecording && (
+                    <div style={styles.recordingIndicator}>
+                      <div style={styles.recordingDot}></div>
+                      <span style={styles.recordingText}>Recording</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -569,7 +632,7 @@ export default function OrbitPhone() {
                 </button>
               </div>
 
-              {/* 🆕 Secondary Controls Row with Keypad */}
+              {/* Secondary Controls Row with Keypad */}
               <div style={styles.secondaryControls}>
                 <button
                   style={{
@@ -604,14 +667,14 @@ export default function OrbitPhone() {
           )}
         </div>
 
-        {/* 🆕 DTMF Keypad Modal */}
+        {/* DTMF Keypad Modal */}
         {showKeypad && inCall && (
           <div style={styles.keypadModal} onClick={() => setShowKeypad(false)}>
             <div style={styles.keypadContainer} onClick={(e) => e.stopPropagation()}>
               <div style={styles.keypadHeader}>
                 <h3 style={styles.keypadTitle}>Dialpad</h3>
                 <button style={styles.keypadCloseBtn} onClick={() => setShowKeypad(false)}>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e293b" strokeWidth="2">
                     <line x1="18" y1="6" x2="6" y2="18"></line>
                     <line x1="6" y1="6" x2="18" y2="18"></line>
                   </svg>
@@ -868,6 +931,30 @@ const styles = {
     color: "#667eea",
     marginTop: 4,
   },
+  recordingIndicator: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 12,
+    padding: "8px 16px",
+    background: "rgba(239, 68, 68, 0.1)",
+    borderRadius: 20,
+    display: "inline-flex",
+    margin: "12px auto 0",
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    background: "#ef4444",
+    animation: "recordingPulse 1.5s ease-in-out infinite",
+  },
+  recordingText: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#ef4444",
+  },
   callControls: {
     display: "flex",
     alignItems: "center",
@@ -920,7 +1007,7 @@ const styles = {
     boxShadow: "0 10px 25px rgba(239, 68, 68, 0.4)",
     transition: "all 0.2s ease",
   },
-  // 🆕 Secondary Controls (Keypad button row)
+  // Secondary Controls (Keypad button row)
   secondaryControls: {
     display: "flex",
     justifyContent: "center",
@@ -946,7 +1033,7 @@ const styles = {
     fontWeight: 600,
     color: "#475569",
   },
-  // 🆕 DTMF Keypad Modal Styles
+  // DTMF Keypad Modal Styles
   keypadModal: {
     position: "absolute",
     top: 0,
@@ -1143,6 +1230,11 @@ styleSheet.textContent = `
     50% { transform: scale(1.05); opacity: 0.8; }
   }
   
+  @keyframes recordingPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(1.2); }
+  }
+  
   button:hover {
     transform: translateY(-2px);
     filter: brightness(1.05);
@@ -1159,7 +1251,6 @@ styleSheet.textContent = `
 
   .keypadBtn:hover {
     background: #667eea !important;
-    color: #fff;
   }
 
   .keypadBtn:hover .keypadDigit,
@@ -1172,6 +1263,10 @@ styleSheet.textContent = `
   }
 
   .secondaryControlBtnActive .secondaryControlLabel {
+    color: #fff !important;
+  }
+
+  .controlBtnActive .controlLabel {
     color: #fff !important;
   }
 `;
