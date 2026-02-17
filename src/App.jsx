@@ -1,46 +1,44 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
 
-// URLs for your backend Cloud Functions
 const TOKEN_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getVoiceToken";
 const VERIFY_ACCESS_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
 
 export default function OrbitPhone() {
-  const deviceRef = useRef(null);
-  const callRef = useRef(null);
+  const deviceRef    = useRef(null);
+  const callRef      = useRef(null);
   const holdMusicRef = useRef(null);
 
-  const [status, setStatus] = useState("Initializing…");
-  const [incoming, setIncoming] = useState(false);
-  const [inCall, setInCall] = useState(false);
+  const [status, setStatus]             = useState("Initializing…");
+  const [incoming, setIncoming]         = useState(false);
+  const [inCall, setInCall]             = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
-  const [micMuted, setMicMuted] = useState(false);
-  const [onHold, setOnHold] = useState(false);
-  const [showKeypad, setShowKeypad] = useState(false);
-  const [authorized, setAuthorized] = useState(false);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [phoneNumber, setPhoneNumber] = useState("");
+  const [micMuted, setMicMuted]         = useState(false);
+  const [onHold, setOnHold]             = useState(false);
+  const [showKeypad, setShowKeypad]     = useState(false);
+  const [authorized, setAuthorized]     = useState(false);
+  const [authChecked, setAuthChecked]   = useState(false);
+  const [phoneNumber, setPhoneNumber]   = useState("");
   const [callDuration, setCallDuration] = useState(0);
-  const [isRecording, setIsRecording] = useState(false);
+  const [isRecording, setIsRecording]   = useState(false);
 
   // --- URL params
-  const params = new URLSearchParams(window.location.search);
-  const agentId = params.get("agentId");
-  const accessKey = params.get("accessKey");
+  const params     = new URLSearchParams(window.location.search);
+  const agentId    = params.get("agentId");
+  const accessKey  = params.get("accessKey");
   const fromNumber = params.get("from");
-  const toNumber = params.get("to");
-  // ✅ Outbound: your app passes ?recording=true when opening the dialer window
-  // e.g. window.open(`/dialer?agentId=x&from=+1xxx&to=+1yyy&recording=true`)
-  const recordingParam = params.get("recording");
+  const toNumber   = params.get("to");
 
   const isOutbound = !!(fromNumber && toNumber);
 
-  // Initialize hold music
+  // Hold music
   useEffect(() => {
-    holdMusicRef.current = new Audio("https://www.twilio.com/docs/voice/twiml/play/hold-music.mp3");
-    holdMusicRef.current.loop = true;
+    holdMusicRef.current = new Audio(
+      "https://www.twilio.com/docs/voice/twiml/play/hold-music.mp3"
+    );
+    holdMusicRef.current.loop   = true;
     holdMusicRef.current.volume = 0.3;
     return () => {
       if (holdMusicRef.current) {
@@ -54,25 +52,23 @@ export default function OrbitPhone() {
   useEffect(() => {
     let interval;
     if (inCall && !onHold) {
-      interval = setInterval(() => setCallDuration((prev) => prev + 1), 1000);
+      interval = setInterval(() => setCallDuration((p) => p + 1), 1000);
     }
     return () => clearInterval(interval);
   }, [inCall, onHold]);
 
-  const formatDuration = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  const formatDuration = (s) => {
+    const m = Math.floor(s / 60);
+    return `${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
   };
 
   const sendDTMF = (digit) => {
     if (callRef.current) {
       callRef.current.sendDigits(digit);
-      console.log("📞 Sent DTMF:", digit);
+      console.log("📞 DTMF:", digit);
     }
   };
 
-  // ✅ Single helper — resets everything cleanly
   const resetCallState = () => {
     setIncoming(false);
     setInCall(false);
@@ -85,6 +81,17 @@ export default function OrbitPhone() {
     if (holdMusicRef.current) {
       holdMusicRef.current.pause();
       holdMusicRef.current.currentTime = 0;
+    }
+  };
+
+  // ✅ Single helper — reads recording from call.customParameters
+  // Works for BOTH inbound (set by inboundCall function) and
+  // outbound (set by outboundCall function via twiml.parameter)
+  const checkRecording = (call) => {
+    const rec = call.customParameters?.get("recording");
+    if (rec === "true") {
+      setIsRecording(true);
+      console.log("🔴 Recording active");
     }
   };
 
@@ -116,10 +123,8 @@ export default function OrbitPhone() {
   // --- Initialize Device
   useEffect(() => {
     const initDevice = async () => {
-      if (!agentId) {
-        setStatus("No agent ID provided");
-        return;
-      }
+      if (!agentId) { setStatus("No agent ID provided"); return; }
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         stream.getTracks().forEach((t) => t.stop());
@@ -133,10 +138,9 @@ export default function OrbitPhone() {
         });
         deviceRef.current = device;
 
-        // ✅ INBOUND: recording flag comes from call.customParameters
-        // The inboundCall Cloud Function injects it via TwiML <Parameter>
+        // --- Inbound
         device.on("incoming", (call) => {
-          console.log("📞 Incoming call:", call.parameters);
+          console.log("📞 Incoming:", call.parameters);
           callRef.current = call;
           setIncoming(true);
           setPhoneNumber(call.parameters.From || "Unknown");
@@ -146,12 +150,7 @@ export default function OrbitPhone() {
             setIncoming(false);
             setInCall(true);
             setStatus("Connected");
-            // Read the recording flag passed by inboundCall function
-            const rec = call.customParameters?.get("recording");
-            if (rec === "true") {
-              setIsRecording(true);
-              console.log("🔴 Recording active (inbound)");
-            }
+            checkRecording(call); // ✅ reads from customParameters
           });
 
           call.on("disconnect", () => {
@@ -219,12 +218,7 @@ export default function OrbitPhone() {
 
       call.on("accept", () => {
         setStatus("Connected");
-        // ✅ OUTBOUND: recording flag comes from the URL param
-        // Your app sets this when opening the dialer window based on phone settings
-        if (recordingParam === "true") {
-          setIsRecording(true);
-          console.log("🔴 Recording active (outbound)");
-        }
+        checkRecording(call); // ✅ reads from customParameters set by outboundCall function
       });
 
       call.on("disconnect", () => {
@@ -245,7 +239,7 @@ export default function OrbitPhone() {
     }
   };
 
-  // --- Call controls
+  // --- Controls
   const accept = () => {
     if (!callRef.current) return;
     callRef.current.accept();
@@ -277,16 +271,13 @@ export default function OrbitPhone() {
 
   const toggleHold = () => {
     if (!callRef.current) return;
-    const newHoldState = !onHold;
-    setOnHold(newHoldState);
-
-    if (newHoldState) {
+    const newHold = !onHold;
+    setOnHold(newHold);
+    if (newHold) {
       callRef.current.mute(true);
       setMicMuted(true);
       try { callRef.current.sendDigits("*"); } catch (e) {}
-      if (holdMusicRef.current) {
-        holdMusicRef.current.play().catch((e) => console.error("Hold music:", e));
-      }
+      holdMusicRef.current?.play().catch(() => {});
       setStatus("On Hold");
     } else {
       callRef.current.mute(false);
@@ -303,22 +294,20 @@ export default function OrbitPhone() {
 
   const formatPhoneNumber = (num) => {
     if (!num) return "";
-    const cleaned = num.replace(/\D/g, "");
-    if (cleaned.length === 11 && cleaned.startsWith("1")) {
-      return `+1 (${cleaned.slice(1, 4)}) ${cleaned.slice(4, 7)}-${cleaned.slice(7)}`;
-    }
-    if (cleaned.length === 10) {
-      return `(${cleaned.slice(0, 3)}) ${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
-    }
+    const c = num.replace(/\D/g, "");
+    if (c.length === 11 && c.startsWith("1"))
+      return `+1 (${c.slice(1, 4)}) ${c.slice(4, 7)}-${c.slice(7)}`;
+    if (c.length === 10)
+      return `(${c.slice(0, 3)}) ${c.slice(3, 6)}-${c.slice(6)}`;
     return num;
   };
 
   if (!authChecked)
     return (
       <Screen>
-        <div style={styles.centerContent}>
-          <div style={styles.loader}></div>
-          <p style={styles.statusText}>Verifying access...</p>
+        <div style={s.centerContent}>
+          <div style={s.loader} />
+          <p style={s.statusText}>Verifying access...</p>
         </div>
       </Screen>
     );
@@ -326,88 +315,86 @@ export default function OrbitPhone() {
   if (!authorized)
     return (
       <Screen>
-        <div style={styles.centerContent}>
-          <div style={styles.errorIcon}>
+        <div style={s.centerContent}>
+          <div style={s.errorIcon}>
             <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="15" y1="9" x2="9" y2="15"></line>
-              <line x1="9" y1="9" x2="15" y2="15"></line>
+              <circle cx="12" cy="12" r="10" />
+              <line x1="15" y1="9" x2="9" y2="15" />
+              <line x1="9" y1="9" x2="15" y2="15" />
             </svg>
           </div>
-          <p style={styles.errorTitle}>Unauthorized Access</p>
-          <p style={styles.errorText}>You don't have permission to access this phone.</p>
+          <p style={s.errorTitle}>Unauthorized Access</p>
+          <p style={s.errorText}>You don't have permission to access this phone.</p>
         </div>
       </Screen>
     );
 
   return (
-    <div style={styles.page}>
-      {/* Audio Enable Modal */}
+    <div style={s.page}>
+      {/* Audio modal */}
       {!audioEnabled && !isOutbound && (
-        <div style={styles.modal}>
-          <div style={styles.modalCard}>
-            <div style={styles.modalIcon}>
+        <div style={s.modal}>
+          <div style={s.modalCard}>
+            <div style={s.modalIcon}>
               <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#667eea" strokeWidth="2">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                <line x1="12" y1="19" x2="12" y2="23"></line>
-                <line x1="8" y1="23" x2="16" y2="23"></line>
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
               </svg>
             </div>
-            <h3 style={styles.modalTitle}>Enable Audio</h3>
-            <p style={styles.modalText}>Allow audio access to hear incoming calls and communicate clearly.</p>
-            <button style={styles.primaryBtn} onClick={() => setAudioEnabled(true)}>Enable Audio</button>
+            <h3 style={s.modalTitle}>Enable Audio</h3>
+            <p style={s.modalText}>Allow audio access to hear incoming calls and communicate clearly.</p>
+            <button style={s.primaryBtn} onClick={() => setAudioEnabled(true)}>Enable Audio</button>
           </div>
         </div>
       )}
 
-      <div style={styles.phone}>
+      <div style={s.phone}>
         {/* Header */}
-        <div style={styles.header}>
-          <div style={styles.headerContent}>
-            <div style={styles.brandContainer}>
+        <div style={s.header}>
+          <div style={s.headerContent}>
+            <div style={s.brandContainer}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
               </svg>
-              <span style={styles.brandText}>Orbit Phone</span>
+              <span style={s.brandText}>Orbit Phone</span>
             </div>
-            <div style={styles.statusBadge}>
-              <div style={styles.statusDot}></div>
-              <span style={styles.statusLabel}>Online</span>
+            <div style={s.statusBadge}>
+              <div style={s.statusDot} />
+              <span style={s.statusLabel}>Online</span>
             </div>
           </div>
         </div>
 
-        {/* Main Content */}
-        <div style={styles.content}>
-
-          {/* Incoming Call */}
+        <div style={s.content}>
+          {/* Incoming */}
           {incoming && (
-            <div style={styles.incomingContainer}>
-              <div style={styles.callerInfo}>
-                <div style={styles.avatarRing}>
-                  <div style={styles.avatar}>
+            <div style={s.incomingContainer}>
+              <div style={s.callerInfo}>
+                <div style={s.avatarRing}>
+                  <div style={s.avatar}>
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                      <circle cx="12" cy="7" r="4"></circle>
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                      <circle cx="12" cy="7" r="4" />
                     </svg>
                   </div>
                 </div>
-                <div style={styles.callerDetails}>
-                  <div style={styles.callerLabel}>Incoming Call</div>
-                  <div style={styles.callerNumber}>{formatPhoneNumber(phoneNumber)}</div>
+                <div style={s.callerDetails}>
+                  <div style={s.callerLabel}>Incoming Call</div>
+                  <div style={s.callerNumber}>{formatPhoneNumber(phoneNumber)}</div>
                 </div>
               </div>
-              <div style={styles.incomingActions}>
-                <button style={styles.rejectBtn} onClick={reject}>
+              <div style={s.incomingActions}>
+                <button style={s.rejectBtn} onClick={reject}>
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
                   </svg>
                   Decline
                 </button>
-                <button style={styles.acceptBtn} onClick={accept}>
+                <button style={s.acceptBtn} onClick={accept}>
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
                   </svg>
                   Accept
                 </button>
@@ -415,141 +402,138 @@ export default function OrbitPhone() {
             </div>
           )}
 
-          {/* Active Call */}
+          {/* Active call */}
           {inCall && !incoming && (
-            <div style={styles.activeCallContainer}>
-              <div style={styles.activeCallInfo}>
-                <div style={styles.activeAvatar}>
+            <div style={s.activeCallContainer}>
+              <div style={s.activeCallInfo}>
+                <div style={s.activeAvatar}>
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                    <circle cx="12" cy="7" r="4"></circle>
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
                   </svg>
                 </div>
-                <div style={styles.activeCallDetails}>
-                  <div style={styles.activeNumber}>{formatPhoneNumber(phoneNumber)}</div>
-                  <div style={styles.activeStatus}>{status}</div>
-                  <div style={styles.activeDuration}>{formatDuration(callDuration)}</div>
-
-                  {/* ✅ Recording badge — only shows when recording is active */}
+                <div style={s.activeCallDetails}>
+                  <div style={s.activeNumber}>{formatPhoneNumber(phoneNumber)}</div>
+                  <div style={s.activeStatus}>{status}</div>
+                  <div style={s.activeDuration}>{formatDuration(callDuration)}</div>
                   {isRecording && (
-                    <div style={styles.recordingIndicator}>
-                      <div style={styles.recordingDot}></div>
-                      <span style={styles.recordingText}>Recording</span>
+                    <div style={s.recordingIndicator}>
+                      <div style={s.recordingDot} />
+                      <span style={s.recordingText}>Recording</span>
                     </div>
                   )}
                 </div>
               </div>
 
-              <div style={styles.callControls}>
+              <div style={s.callControls}>
                 <button
-                  style={{ ...styles.controlBtn, ...(micMuted && !onHold ? styles.controlBtnActive : {}) }}
+                  style={{ ...s.controlBtn, ...(micMuted && !onHold ? s.controlBtnActive : {}) }}
                   onClick={toggleMic}
                   disabled={onHold}
                 >
-                  <div style={styles.controlIconContainer}>
+                  <div style={s.controlIconContainer}>
                     {micMuted ? (
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="1" y1="1" x2="23" y2="23"></line>
-                        <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                        <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-                        <line x1="12" y1="19" x2="12" y2="23"></line>
-                        <line x1="8" y1="23" x2="16" y2="23"></line>
+                        <line x1="1" y1="1" x2="23" y2="23" />
+                        <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+                        <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
+                        <line x1="12" y1="19" x2="12" y2="23" />
+                        <line x1="8" y1="23" x2="16" y2="23" />
                       </svg>
                     ) : (
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                        <line x1="12" y1="19" x2="12" y2="23"></line>
-                        <line x1="8" y1="23" x2="16" y2="23"></line>
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="23" />
+                        <line x1="8" y1="23" x2="16" y2="23" />
                       </svg>
                     )}
                   </div>
-                  <span style={styles.controlLabel}>{micMuted ? "Unmute" : "Mute"}</span>
+                  <span style={s.controlLabel}>{micMuted ? "Unmute" : "Mute"}</span>
                 </button>
 
-                <button style={styles.hangupBtn} onClick={hangup}>
+                <button style={s.hangupBtn} onClick={hangup}>
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
                   </svg>
                 </button>
 
                 <button
-                  style={{ ...styles.controlBtn, ...(onHold ? styles.controlBtnActive : {}) }}
+                  style={{ ...s.controlBtn, ...(onHold ? s.controlBtnActive : {}) }}
                   onClick={toggleHold}
                 >
-                  <div style={styles.controlIconContainer}>
+                  <div style={s.controlIconContainer}>
                     {onHold ? (
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                        <polygon points="5 3 19 12 5 21 5 3" />
                       </svg>
                     ) : (
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="6" y="4" width="4" height="16"></rect>
-                        <rect x="14" y="4" width="4" height="16"></rect>
+                        <rect x="6" y="4" width="4" height="16" />
+                        <rect x="14" y="4" width="4" height="16" />
                       </svg>
                     )}
                   </div>
-                  <span style={styles.controlLabel}>{onHold ? "Resume" : "Hold"}</span>
+                  <span style={s.controlLabel}>{onHold ? "Resume" : "Hold"}</span>
                 </button>
               </div>
 
-              {/* Keypad Button */}
-              <div style={styles.secondaryControls}>
+              <div style={s.secondaryControls}>
                 <button
-                  style={{ ...styles.secondaryControlBtn, ...(showKeypad ? styles.secondaryControlBtnActive : {}) }}
+                  style={{ ...s.secondaryControlBtn, ...(showKeypad ? s.secondaryControlBtnActive : {}) }}
                   onClick={toggleKeypad}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="3" y="3" width="7" height="7"></rect>
-                    <rect x="14" y="3" width="7" height="7"></rect>
-                    <rect x="3" y="14" width="7" height="7"></rect>
-                    <rect x="14" y="14" width="7" height="7"></rect>
+                    <rect x="3" y="3" width="7" height="7" />
+                    <rect x="14" y="3" width="7" height="7" />
+                    <rect x="3" y="14" width="7" height="7" />
+                    <rect x="14" y="14" width="7" height="7" />
                   </svg>
-                  <span style={styles.secondaryControlLabel}>Keypad</span>
+                  <span style={s.secondaryControlLabel}>Keypad</span>
                 </button>
               </div>
             </div>
           )}
 
-          {/* Idle State */}
+          {/* Idle */}
           {!inCall && !incoming && (
-            <div style={styles.idleContainer}>
-              <div style={styles.idleIcon}>
+            <div style={s.idleContainer}>
+              <div style={s.idleIcon}>
                 <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="1.5">
-                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
                 </svg>
               </div>
-              <div style={styles.idleTitle}>Ready for Calls</div>
-              <div style={styles.idleText}>{status}</div>
+              <div style={s.idleTitle}>Ready for Calls</div>
+              <div style={s.idleText}>{status}</div>
             </div>
           )}
         </div>
 
-        {/* DTMF Keypad Modal */}
+        {/* DTMF Keypad */}
         {showKeypad && inCall && (
-          <div style={styles.keypadModal} onClick={() => setShowKeypad(false)}>
-            <div style={styles.keypadContainer} onClick={(e) => e.stopPropagation()}>
-              <div style={styles.keypadHeader}>
-                <h3 style={styles.keypadTitle}>Dialpad</h3>
-                <button style={styles.keypadCloseBtn} onClick={() => setShowKeypad(false)}>
+          <div style={s.keypadModal} onClick={() => setShowKeypad(false)}>
+            <div style={s.keypadContainer} onClick={(e) => e.stopPropagation()}>
+              <div style={s.keypadHeader}>
+                <h3 style={s.keypadTitle}>Dialpad</h3>
+                <button style={s.keypadCloseBtn} onClick={() => setShowKeypad(false)}>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e293b" strokeWidth="2.5">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
                 </button>
               </div>
-              <div style={styles.keypadGrid}>
+              <div style={s.keypadGrid}>
                 {[
-                  { digit: "1", letters: "" },  { digit: "2", letters: "ABC" },
-                  { digit: "3", letters: "DEF" },{ digit: "4", letters: "GHI" },
-                  { digit: "5", letters: "JKL" },{ digit: "6", letters: "MNO" },
-                  { digit: "7", letters: "PQRS"},{ digit: "8", letters: "TUV" },
-                  { digit: "9", letters: "WXYZ"},{ digit: "*", letters: "" },
-                  { digit: "0", letters: "+" },  { digit: "#", letters: "" },
+                  { digit: "1", letters: "" },    { digit: "2", letters: "ABC" },
+                  { digit: "3", letters: "DEF" },  { digit: "4", letters: "GHI" },
+                  { digit: "5", letters: "JKL" },  { digit: "6", letters: "MNO" },
+                  { digit: "7", letters: "PQRS" }, { digit: "8", letters: "TUV" },
+                  { digit: "9", letters: "WXYZ" }, { digit: "*", letters: "" },
+                  { digit: "0", letters: "+" },    { digit: "#", letters: "" },
                 ].map(({ digit, letters }) => (
-                  <button key={digit} style={styles.keypadBtn} onClick={() => sendDTMF(digit)}>
-                    <span style={styles.keypadDigit}>{digit}</span>
-                    {letters && <span style={styles.keypadLetters}>{letters}</span>}
+                  <button key={digit} style={s.keypadBtn} onClick={() => sendDTMF(digit)}>
+                    <span style={s.keypadDigit}>{digit}</span>
+                    {letters && <span style={s.keypadLetters}>{letters}</span>}
                   </button>
                 ))}
               </div>
@@ -562,10 +546,10 @@ export default function OrbitPhone() {
 }
 
 const Screen = ({ children }) => (
-  <div style={styles.page}><div style={styles.phone}>{children}</div></div>
+  <div style={s.page}><div style={s.phone}>{children}</div></div>
 );
 
-const styles = {
+const s = {
   page: { minHeight: "100vh", width: "100vw", display: "flex", justifyContent: "center", alignItems: "center", background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif", padding: "20px" },
   phone: { width: 420, maxWidth: "100%", background: "#ffffff", borderRadius: 32, boxShadow: "0 25px 80px rgba(0,0,0,0.25), 0 10px 40px rgba(0,0,0,0.15)", overflow: "hidden", display: "flex", flexDirection: "column", position: "relative" },
   header: { background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)", padding: "20px 24px" },
@@ -635,11 +619,11 @@ const styles = {
 
 const styleSheet = document.createElement("style");
 styleSheet.textContent = `
-  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-  @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.05); opacity: 0.8; } }
-  @keyframes recordingPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.3); } }
-  button:hover { transform: translateY(-2px); filter: brightness(1.05); }
-  button:active { transform: translateY(0); }
-  button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+  @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.05);opacity:0.8}}
+  @keyframes recordingPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.4;transform:scale(1.3)}}
+  button:hover{transform:translateY(-2px);filter:brightness(1.05)}
+  button:active{transform:translateY(0)}
+  button:disabled{opacity:0.5;cursor:not-allowed;transform:none}
 `;
 document.head.appendChild(styleSheet);
