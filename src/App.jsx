@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Device } from "@twilio/voice-sdk";
-import { getFirestore, doc, getDoc } from "firebase/firestore";
 
 // URLs for your backend Cloud Functions
 const TOKEN_URL =
@@ -25,7 +24,6 @@ export default function OrbitPhone() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [callDuration, setCallDuration] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
-  const [recordingEnabled, setRecordingEnabled] = useState(false);
 
   // --- URL params
   const params = new URLSearchParams(window.location.search);
@@ -49,29 +47,6 @@ export default function OrbitPhone() {
       }
     };
   }, []);
-
-  // Fetch recording settings from Firestore
-  useEffect(() => {
-    const fetchRecordingSettings = async () => {
-      if (!fromNumber) return;
-
-      try {
-        const db = getFirestore();
-        const phoneDocRef = doc(db, "phone_numbers", fromNumber);
-        const phoneDoc = await getDoc(phoneDocRef);
-
-        if (phoneDoc.exists()) {
-          const data = phoneDoc.data();
-          setRecordingEnabled(data.recording === true);
-          console.log(`📹 Recording enabled for ${fromNumber}:`, data.recording);
-        }
-      } catch (error) {
-        console.error("Error fetching recording settings:", error);
-      }
-    };
-
-    fetchRecordingSettings();
-  }, [fromNumber]);
 
   // Call duration timer
   useEffect(() => {
@@ -162,12 +137,6 @@ export default function OrbitPhone() {
             setIncoming(false);
             setInCall(true);
             setStatus("Connected");
-            
-            // Set recording status based on settings
-            if (recordingEnabled) {
-              setIsRecording(true);
-              console.log("🔴 Recording started");
-            }
           });
 
           // When caller hangs up (either during ringing or after connected)
@@ -251,7 +220,7 @@ export default function OrbitPhone() {
     };
 
     initDevice();
-  }, [agentId, isOutbound, recordingEnabled]);
+  }, [agentId, isOutbound]);
 
   // --- Outbound call
   const makeOutbound = async (number = phoneNumber) => {
@@ -283,12 +252,6 @@ export default function OrbitPhone() {
       call.on("accept", () => {
         console.log("✅ Call connected");
         setStatus("Connected");
-        
-        // Set recording status based on settings
-        if (recordingEnabled) {
-          setIsRecording(true);
-          console.log("🔴 Recording started");
-        }
       });
 
       call.on("disconnect", () => {
@@ -664,7 +627,7 @@ export default function OrbitPhone() {
               <div style={styles.keypadHeader}>
                 <h3 style={styles.keypadTitle}>Dialpad</h3>
                 <button style={styles.keypadCloseBtn} onClick={() => setShowKeypad(false)}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e293b" strokeWidth="2">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#000000" strokeWidth="2">
                     <line x1="18" y1="6" x2="6" y2="18"></line>
                     <line x1="6" y1="6" x2="18" y2="18"></line>
                   </svg>
