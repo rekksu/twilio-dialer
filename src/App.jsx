@@ -31,6 +31,7 @@ export default function OrbitPhone() {
   const accessKey = params.get("accessKey");
   const fromNumber = params.get("from");
   const toNumber = params.get("to");
+  const orgId = params.get("orgId"); // ← ADD THIS
 
   const isOutbound = !!(fromNumber && toNumber);
 
@@ -113,11 +114,15 @@ export default function OrbitPhone() {
         stream.getTracks().forEach((t) => t.stop());
 
         // Get Twilio token
-        const res = await fetch(`${TOKEN_URL}?identity=${agentId}`);
-        const { token } = await res.json();
+        const res = await fetch(`${TOKEN_URL}?identity=${agentId}&orgId=${orgId}`);
+        const data = await res.json();
+
+        if (!data.token) {
+          throw new Error(data.error || "Failed to get token");
+        }
 
         // Initialize Twilio Device with enableRingingState
-        const device = new Device(token, {
+        const device = new Device(data.token, {  // ← Use data.token, not just { token }
           enableRingingState: true,
           closeProtection: true,
         });
@@ -309,13 +314,13 @@ export default function OrbitPhone() {
 
   const hangup = () => {
     if (!callRef.current) return;
-    
+
     // Stop hold music if playing
     if (holdMusicRef.current) {
       holdMusicRef.current.pause();
       holdMusicRef.current.currentTime = 0;
     }
-    
+
     callRef.current.disconnect();
     setInCall(false);
     setMicMuted(false);
@@ -339,40 +344,40 @@ export default function OrbitPhone() {
     if (newHoldState) {
       // Put call on hold
       console.log("📵 Putting call on hold");
-      
+
       // Mute the microphone
       callRef.current.mute(true);
       setMicMuted(true);
-      
+
       // Send custom parameters to Twilio to trigger hold music on their end
       try {
         callRef.current.sendDigits("*");
       } catch (err) {
         console.log("Could not send hold signal:", err);
       }
-      
+
       // Play local hold music for the agent
       if (holdMusicRef.current) {
         holdMusicRef.current.play().catch(err => {
           console.error("Could not play hold music:", err);
         });
       }
-      
+
       setStatus("On Hold");
     } else {
       // Resume call from hold
       console.log("📞 Resuming call");
-      
+
       // Unmute the microphone
       callRef.current.mute(false);
       setMicMuted(false);
-      
+
       // Stop local hold music
       if (holdMusicRef.current) {
         holdMusicRef.current.pause();
         holdMusicRef.current.currentTime = 0;
       }
-      
+
       setStatus("Connected");
     }
   };
@@ -515,7 +520,7 @@ export default function OrbitPhone() {
                   <div style={styles.activeNumber}>{formatPhoneNumber(phoneNumber)}</div>
                   <div style={styles.activeStatus}>{status}</div>
                   <div style={styles.activeDuration}>{formatDuration(callDuration)}</div>
-                  
+
                   {/* Recording Indicator */}
                   {isRecording && (
                     <div style={styles.recordingIndicator}>
