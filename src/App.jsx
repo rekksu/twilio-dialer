@@ -10,6 +10,10 @@ const VERIFY_ACCESS_URL =
 const ASSIGNED_NUMBERS_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getAgentNumbers";
 
+// Looks up which of the agent's numbers was actually dialed for an incoming call
+const LOOKUP_CALLED_NUMBER_URL =
+  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getCalledNumber";
+
 // How many ms before token expiry to refresh (5 minutes)
 const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000;
 // Default token lifetime (1 hour) — override if your backend uses a different TTL
@@ -159,16 +163,6 @@ export default function OrbitPhone() {
     }, delay);
   };
 
-  // ── Fallback: if calledToNumber is still blank after the incoming event
-  // fires but assignedNumbers has loaded, and the agent only has ONE assigned
-  // number, we know exactly which line rang. If they have multiple numbers we
-  // can't guess, so we leave it blank rather than show the wrong one.
-  useEffect(() => {
-    if (!calledToNumber && incoming && assignedNumbers.length === 1) {
-      setCalledToNumber(assignedNumbers[0]);
-    }
-  }, [calledToNumber, incoming, assignedNumbers]);
-
   // Helper to reset all call state
   const resetCallState = () => {
     setIncoming(false);
@@ -224,23 +218,17 @@ export default function OrbitPhone() {
           setIncoming(true);
           setPhoneNumber(call.parameters.From || "Unknown");
 
-          // ── Capture which number this call came in on ──────────────────
-          // call.parameters.To is sometimes a raw phone number like +18582983966,
-          // but for calls routed to a Twilio client identity it looks like
-          // "client:app_users/Zm1o…". In that case we can't display it directly.
-          //
-          // Strategy:
-          //   1. If To looks like a phone number (+digits), use it directly.
-          //   2. If To is a client identity string, fall back to the *last*
-          //      number in assignedNumbers (the one most recently fetched).
-          //      When the agent only has one assigned number that's always correct;
-          //      when they have several the backend should ideally send the called
-          //      number in a custom parameter — see note below.
-          //   3. Also check call.parameters.Called and call.parameters.ForwardedFrom
-          //      which Twilio sometimes populates with the real PSTN number.
+          // ── Resolve which number this call came in on ─────────────────
+          // call.parameters.To is often a client identity string like
+          // "client:app_users/Zm1o…" rather than a real phone number.
+          // We use a 3-stage resolution:
+          //   1. Direct: if To / Called looks like a real phone number, use it.
+          //   2. Single-number shortcut: if the agent only has 1 assigned number.
+          //   3. Backend lookup: call getCalledNumber to query Twilio call logs.
           const rawTo = call.parameters.To || "";
           const rawCalled = call.parameters.Called || "";
           const phoneRegex = /^\+?[1-9]\d{6,14}$/;
+          const fromNum = call.parameters.From || "";
 
           let resolvedTo = "";
           if (phoneRegex.test(rawTo.replace(/\s/g, ""))) {
@@ -248,9 +236,26 @@ export default function OrbitPhone() {
           } else if (phoneRegex.test(rawCalled.replace(/\s/g, ""))) {
             resolvedTo = rawCalled;
           }
-          // If still empty, we'll try to resolve later from assignedNumbers
-          // (see the assignedNumbers useEffect for the "single number" shortcut).
-          setCalledToNumber(resolvedTo);
+
+          if (resolvedTo) {
+            setCalledToNumber(resolvedTo);
+          } else {
+            // Stage 3: ask the backend which number was dialed
+            setCalledToNumber(""); // clear while we look up
+            fetch(
+              `${LOOKUP_CALLED_NUMBER_URL}?from=${encodeURIComponent(fromNum)}&agentId=${encodeURIComponent(agentId)}&orgId=${encodeURIComponent(orgId)}`
+            )
+              .then((r) => r.json())
+              .then((d) => {
+                if (d.calledNumber) {
+                  console.log("✅ Resolved called number:", d.calledNumber);
+                  setCalledToNumber(d.calledNumber);
+                }
+              })
+              .catch((err) =>
+                console.warn("Could not resolve called number:", err)
+              );
+          }
           // ──────────────────────────────────────────────────────────────
 
           setStatus("Incoming call...");
