@@ -209,6 +209,7 @@ export default function OrbitPhone() {
 
         // Incoming calls
         device.on("incoming", (call) => {
+          console.log("📞 ALL CALL PARAMETERS:", JSON.stringify(call.parameters));
           console.log("📞 Incoming call received:", call.parameters);
           callRef.current = call;
           setIncoming(true);
