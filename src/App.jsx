@@ -7,13 +7,8 @@ const TOKEN_URL =
 const VERIFY_ACCESS_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/verifyDialerAccess";
 
-// ─── NEW: fetch the phone numbers assigned to this agent ───────────────────
-// This calls getVoiceToken with an extra flag so the backend can return
-// assignedNumbers alongside the token. Adjust the URL/field name to match
-// whatever your Cloud Function actually returns.
 const ASSIGNED_NUMBERS_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getAgentNumbers";
-// ───────────────────────────────────────────────────────────────────────────
 
 // How many ms before token expiry to refresh (5 minutes)
 const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000;
@@ -24,7 +19,7 @@ export default function OrbitPhone() {
   const deviceRef = useRef(null);
   const callRef = useRef(null);
   const holdMusicRef = useRef(null);
-  const tokenRefreshTimerRef = useRef(null); // ← NEW: timer ref for refresh
+  const tokenRefreshTimerRef = useRef(null);
 
   const [status, setStatus] = useState("Initializing…");
   const [incoming, setIncoming] = useState(false);
@@ -36,9 +31,10 @@ export default function OrbitPhone() {
   const [authorized, setAuthorized] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
+  const [calledToNumber, setCalledToNumber] = useState(""); // ← NEW: the "To" number
   const [callDuration, setCallDuration] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
-  const [assignedNumbers, setAssignedNumbers] = useState([]); // ← NEW
+  const [assignedNumbers, setAssignedNumbers] = useState([]);
 
   // --- URL params
   const params = new URLSearchParams(window.location.search);
@@ -117,7 +113,7 @@ export default function OrbitPhone() {
     verify();
   }, [accessKey]);
 
-  // ─── NEW: fetch assigned phone numbers for this agent ────────────────────
+  // fetch assigned phone numbers for this agent
   useEffect(() => {
     if (!agentId || !orgId) return;
     const fetchNumbers = async () => {
@@ -127,7 +123,6 @@ export default function OrbitPhone() {
         );
         if (!res.ok) return;
         const data = await res.json();
-        // Expecting: { numbers: ["+18582983966", "+18887998241"] }
         if (Array.isArray(data.numbers)) {
           setAssignedNumbers(data.numbers);
         }
@@ -137,11 +132,8 @@ export default function OrbitPhone() {
     };
     fetchNumbers();
   }, [agentId, orgId]);
-  // ─────────────────────────────────────────────────────────────────────────
 
-  // ─── NEW: token refresh helper ───────────────────────────────────────────
-  // Fetches a fresh token and calls device.updateToken() so the session
-  // never expires. Schedules itself again before the new token expires.
+  // token refresh helper
   const scheduleTokenRefresh = (ttlMs = DEFAULT_TOKEN_TTL_MS) => {
     if (tokenRefreshTimerRef.current) {
       clearTimeout(tokenRefreshTimerRef.current);
@@ -157,18 +149,33 @@ export default function OrbitPhone() {
         if (data.token && deviceRef.current) {
           deviceRef.current.updateToken(data.token);
           console.log("✅ Twilio token refreshed — session extended");
-          // data.ttl is seconds if your backend sends it, else use default
           const nextTtl = data.ttl ? data.ttl * 1000 : DEFAULT_TOKEN_TTL_MS;
           scheduleTokenRefresh(nextTtl);
         }
       } catch (err) {
         console.error("❌ Token refresh failed:", err);
-        // Retry in 1 minute
         scheduleTokenRefresh(60_000 + REFRESH_BEFORE_EXPIRY_MS);
       }
     }, delay);
   };
-  // ─────────────────────────────────────────────────────────────────────────
+
+  // Helper to reset all call state
+  const resetCallState = () => {
+    setIncoming(false);
+    setInCall(false);
+    setMicMuted(false);
+    setOnHold(false);
+    setShowKeypad(false);
+    setIsRecording(false);
+    setPhoneNumber("");
+    setCalledToNumber(""); // ← clear the "To" number too
+    setCallDuration(0);
+    callRef.current = null;
+    if (holdMusicRef.current) {
+      holdMusicRef.current.pause();
+      holdMusicRef.current.currentTime = 0;
+    }
+  };
 
   // --- Initialize Device
   useEffect(() => {
@@ -206,6 +213,12 @@ export default function OrbitPhone() {
           callRef.current = call;
           setIncoming(true);
           setPhoneNumber(call.parameters.From || "Unknown");
+
+          // ── Capture which number this call came in on ──────────────────
+          // Twilio sends the dialed number in call.parameters.To
+          setCalledToNumber(call.parameters.To || "");
+          // ──────────────────────────────────────────────────────────────
+
           setStatus("Incoming call...");
 
           call.on("accept", () => {
@@ -217,61 +230,29 @@ export default function OrbitPhone() {
 
           call.on("disconnect", () => {
             console.log("📴 Call disconnected");
-            setIncoming(false);
-            setInCall(false);
-            setMicMuted(false);
-            setOnHold(false);
-            setShowKeypad(false);
-            setIsRecording(false);
-            if (holdMusicRef.current) {
-              holdMusicRef.current.pause();
-              holdMusicRef.current.currentTime = 0;
-            }
-            callRef.current = null;
+            resetCallState();
             setStatus("Call ended");
-            setPhoneNumber("");
-            setCallDuration(0);
             setTimeout(() => setStatus("Ready"), 2000);
           });
 
           call.on("cancel", () => {
             console.log("❌ Call cancelled by caller");
-            setIncoming(false);
-            setInCall(false);
-            setMicMuted(false);
-            setOnHold(false);
-            setShowKeypad(false);
-            setIsRecording(false);
-            callRef.current = null;
+            resetCallState();
             setStatus("Missed call");
-            setPhoneNumber("");
             setTimeout(() => setStatus("Ready"), 2000);
           });
 
           call.on("reject", () => {
             console.log("🚫 Call rejected");
-            setIncoming(false);
-            setInCall(false);
-            setMicMuted(false);
-            setOnHold(false);
-            setShowKeypad(false);
-            setIsRecording(false);
-            callRef.current = null;
+            resetCallState();
             setStatus("Call rejected");
-            setPhoneNumber("");
             setTimeout(() => setStatus("Ready"), 2000);
           });
 
           call.on("error", (err) => {
             console.error("⚠️ Call error:", err);
             setStatus(`Error: ${err.message}`);
-            setIncoming(false);
-            setInCall(false);
-            setOnHold(false);
-            setShowKeypad(false);
-            setIsRecording(false);
-            callRef.current = null;
-            setPhoneNumber("");
+            resetCallState();
             setTimeout(() => setStatus("Ready"), 2000);
           });
         });
@@ -280,10 +261,9 @@ export default function OrbitPhone() {
         await device.register();
         setStatus("Ready");
 
-        // ─── NEW: start the token refresh cycle ──────────────────────────
+        // Start the token refresh cycle
         const initialTtl = data.ttl ? data.ttl * 1000 : DEFAULT_TOKEN_TTL_MS;
         scheduleTokenRefresh(initialTtl);
-        // ─────────────────────────────────────────────────────────────────
 
         // Auto outbound call or wait for inbound
         if (isOutbound) {
@@ -298,7 +278,6 @@ export default function OrbitPhone() {
 
     initDevice();
 
-    // Cleanup: clear refresh timer when component unmounts
     return () => {
       if (tokenRefreshTimerRef.current) {
         clearTimeout(tokenRefreshTimerRef.current);
@@ -340,36 +319,19 @@ export default function OrbitPhone() {
 
       call.on("disconnect", () => {
         console.log("📴 Call ended");
-        setInCall(false);
-        setMicMuted(false);
-        setOnHold(false);
-        setShowKeypad(false);
-        setIsRecording(false);
-        if (holdMusicRef.current) {
-          holdMusicRef.current.pause();
-          holdMusicRef.current.currentTime = 0;
-        }
-        callRef.current = null;
+        resetCallState();
         setStatus("Call ended");
-        setPhoneNumber("");
-        setCallDuration(0);
         if (isOutbound) setTimeout(() => window.close(), 1000);
       });
 
       call.on("error", (err) => {
         console.error("⚠️ Call error:", err);
         setStatus(`Call failed: ${err.message}`);
-        setInCall(false);
-        setOnHold(false);
-        setShowKeypad(false);
-        setIsRecording(false);
+        resetCallState();
       });
     } catch (err) {
       setStatus(`Connection failed: ${err.message}`);
-      setInCall(false);
-      setOnHold(false);
-      setShowKeypad(false);
-      setIsRecording(false);
+      resetCallState();
     }
   };
 
@@ -385,24 +347,14 @@ export default function OrbitPhone() {
   const reject = () => {
     if (!callRef.current) return;
     callRef.current.reject();
-    setIncoming(false);
-    setInCall(false);
+    resetCallState();
     setStatus("Call rejected");
-    setPhoneNumber("");
   };
 
   const hangup = () => {
     if (!callRef.current) return;
-    if (holdMusicRef.current) {
-      holdMusicRef.current.pause();
-      holdMusicRef.current.currentTime = 0;
-    }
     callRef.current.disconnect();
-    setInCall(false);
-    setMicMuted(false);
-    setOnHold(false);
-    setShowKeypad(false);
-    setIsRecording(false);
+    resetCallState();
   };
 
   const toggleMic = () => {
@@ -471,23 +423,14 @@ export default function OrbitPhone() {
       <Screen>
         <div style={styles.centerContent}>
           <div style={styles.errorIcon}>
-            <svg
-              width="64"
-              height="64"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#ef4444"
-              strokeWidth="2"
-            >
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
               <circle cx="12" cy="12" r="10"></circle>
               <line x1="15" y1="9" x2="9" y2="15"></line>
               <line x1="9" y1="9" x2="15" y2="15"></line>
             </svg>
           </div>
           <p style={styles.errorTitle}>Unauthorized Access</p>
-          <p style={styles.errorText}>
-            You don't have permission to access this phone.
-          </p>
+          <p style={styles.errorText}>You don't have permission to access this phone.</p>
         </div>
       </Screen>
     );
@@ -499,14 +442,7 @@ export default function OrbitPhone() {
         <div style={styles.modal}>
           <div style={styles.modalCard}>
             <div style={styles.modalIcon}>
-              <svg
-                width="64"
-                height="64"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#667eea"
-                strokeWidth="2"
-              >
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#667eea" strokeWidth="2">
                 <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
                 <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
                 <line x1="12" y1="19" x2="12" y2="23"></line>
@@ -517,10 +453,7 @@ export default function OrbitPhone() {
             <p style={styles.modalText}>
               Allow audio access to hear incoming calls and communicate clearly.
             </p>
-            <button
-              style={styles.primaryBtn}
-              onClick={() => setAudioEnabled(true)}
-            >
+            <button style={styles.primaryBtn} onClick={() => setAudioEnabled(true)}>
               Enable Audio
             </button>
           </div>
@@ -532,14 +465,7 @@ export default function OrbitPhone() {
         <div style={styles.header}>
           <div style={styles.headerContent}>
             <div style={styles.brandContainer}>
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="white"
-                strokeWidth="2"
-              >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
                 <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
               </svg>
               <span style={styles.brandText}>Orbit Phone</span>
@@ -550,7 +476,7 @@ export default function OrbitPhone() {
             </div>
           </div>
 
-          {/* ─── NEW: Assigned Numbers Strip ─────────────────────────────── */}
+          {/* Assigned Numbers Strip */}
           {assignedNumbers.length > 0 && (
             <div style={styles.assignedNumbersBar}>
               <span style={styles.assignedLabel}>Receiving calls on:</span>
@@ -563,7 +489,6 @@ export default function OrbitPhone() {
               </div>
             </div>
           )}
-          {/* ─────────────────────────────────────────────────────────────── */}
         </div>
 
         {/* Main Content */}
@@ -574,14 +499,7 @@ export default function OrbitPhone() {
               <div style={styles.callerInfo}>
                 <div style={styles.avatarRing}>
                   <div style={styles.avatar}>
-                    <svg
-                      width="40"
-                      height="40"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="white"
-                      strokeWidth="2"
-                    >
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
                       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                       <circle cx="12" cy="7" r="4"></circle>
                     </svg>
@@ -592,32 +510,40 @@ export default function OrbitPhone() {
                   <div style={styles.callerNumber}>
                     {formatPhoneNumber(phoneNumber)}
                   </div>
+
+                  {/* ── Called-To Badge ──────────────────────────────────── */}
+                  {calledToNumber && (
+                    <div style={styles.calledToBadge}>
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        style={{ flexShrink: 0 }}
+                      >
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                      </svg>
+                      <span style={styles.calledToLabel}>To:</span>
+                      <span style={styles.calledToNumber}>
+                        {formatPhoneNumber(calledToNumber)}
+                      </span>
+                    </div>
+                  )}
+                  {/* ──────────────────────────────────────────────────────── */}
                 </div>
               </div>
 
               <div style={styles.incomingActions}>
                 <button style={styles.rejectBtn} onClick={reject}>
-                  <svg
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
                   </svg>
                   Decline
                 </button>
                 <button style={styles.acceptBtn} onClick={accept}>
-                  <svg
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
                   </svg>
                   Accept
@@ -631,14 +557,7 @@ export default function OrbitPhone() {
             <div style={styles.activeCallContainer}>
               <div style={styles.activeCallInfo}>
                 <div style={styles.activeAvatar}>
-                  <svg
-                    width="32"
-                    height="32"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="white"
-                    strokeWidth="2"
-                  >
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
                     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                     <circle cx="12" cy="7" r="4"></circle>
                   </svg>
@@ -651,6 +570,28 @@ export default function OrbitPhone() {
                   <div style={styles.activeDuration}>
                     {formatDuration(callDuration)}
                   </div>
+
+                  {/* ── Called-To Badge (also shown during active call) ── */}
+                  {calledToNumber && (
+                    <div style={{ ...styles.calledToBadge, marginTop: 10, justifyContent: "center" }}>
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        style={{ flexShrink: 0 }}
+                      >
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                      </svg>
+                      <span style={styles.calledToLabel}>To:</span>
+                      <span style={styles.calledToNumber}>
+                        {formatPhoneNumber(calledToNumber)}
+                      </span>
+                    </div>
+                  )}
+                  {/* ──────────────────────────────────────────────────── */}
 
                   {isRecording && (
                     <div style={styles.recordingIndicator}>
@@ -672,14 +613,7 @@ export default function OrbitPhone() {
                 >
                   <div style={styles.controlIconContainer}>
                     {micMuted ? (
-                      <svg
-                        width="24"
-                        height="24"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <line x1="1" y1="1" x2="23" y2="23"></line>
                         <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
                         <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
@@ -687,14 +621,7 @@ export default function OrbitPhone() {
                         <line x1="8" y1="23" x2="16" y2="23"></line>
                       </svg>
                     ) : (
-                      <svg
-                        width="24"
-                        height="24"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
                         <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
                         <line x1="12" y1="19" x2="12" y2="23"></line>
@@ -702,20 +629,11 @@ export default function OrbitPhone() {
                       </svg>
                     )}
                   </div>
-                  <span style={styles.controlLabel}>
-                    {micMuted ? "Unmute" : "Mute"}
-                  </span>
+                  <span style={styles.controlLabel}>{micMuted ? "Unmute" : "Mute"}</span>
                 </button>
 
                 <button style={styles.hangupBtn} onClick={hangup}>
-                  <svg
-                    width="28"
-                    height="28"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                  >
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
                   </svg>
                 </button>
@@ -729,33 +647,17 @@ export default function OrbitPhone() {
                 >
                   <div style={styles.controlIconContainer}>
                     {onHold ? (
-                      <svg
-                        width="24"
-                        height="24"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polygon points="5 3 19 12 5 21 5 3"></polygon>
                       </svg>
                     ) : (
-                      <svg
-                        width="24"
-                        height="24"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <rect x="6" y="4" width="4" height="16"></rect>
                         <rect x="14" y="4" width="4" height="16"></rect>
                       </svg>
                     )}
                   </div>
-                  <span style={styles.controlLabel}>
-                    {onHold ? "Resume" : "Hold"}
-                  </span>
+                  <span style={styles.controlLabel}>{onHold ? "Resume" : "Hold"}</span>
                 </button>
               </div>
 
@@ -768,14 +670,7 @@ export default function OrbitPhone() {
                   }}
                   onClick={toggleKeypad}
                 >
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="3" y="3" width="7" height="7"></rect>
                     <rect x="14" y="3" width="7" height="7"></rect>
                     <rect x="3" y="14" width="7" height="7"></rect>
@@ -791,14 +686,7 @@ export default function OrbitPhone() {
           {!inCall && !incoming && (
             <div style={styles.idleContainer}>
               <div style={styles.idleIcon}>
-                <svg
-                  width="80"
-                  height="80"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#cbd5e1"
-                  strokeWidth="1.5"
-                >
+                <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="1.5">
                   <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
                 </svg>
               </div>
@@ -810,28 +698,12 @@ export default function OrbitPhone() {
 
         {/* DTMF Keypad Modal */}
         {showKeypad && inCall && (
-          <div
-            style={styles.keypadModal}
-            onClick={() => setShowKeypad(false)}
-          >
-            <div
-              style={styles.keypadContainer}
-              onClick={(e) => e.stopPropagation()}
-            >
+          <div style={styles.keypadModal} onClick={() => setShowKeypad(false)}>
+            <div style={styles.keypadContainer} onClick={(e) => e.stopPropagation()}>
               <div style={styles.keypadHeader}>
                 <h3 style={styles.keypadTitle}>Dialpad</h3>
-                <button
-                  style={styles.keypadCloseBtn}
-                  onClick={() => setShowKeypad(false)}
-                >
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="#000000"
-                    strokeWidth="2"
-                  >
+                <button style={styles.keypadCloseBtn} onClick={() => setShowKeypad(false)}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#000000" strokeWidth="2">
                     <line x1="18" y1="6" x2="6" y2="18"></line>
                     <line x1="6" y1="6" x2="18" y2="18"></line>
                   </svg>
@@ -852,15 +724,9 @@ export default function OrbitPhone() {
                   { digit: "0", letters: "+" },
                   { digit: "#", letters: "" },
                 ].map(({ digit, letters }) => (
-                  <button
-                    key={digit}
-                    style={styles.keypadBtn}
-                    onClick={() => sendDTMF(digit)}
-                  >
+                  <button key={digit} style={styles.keypadBtn} onClick={() => sendDTMF(digit)}>
                     <span style={styles.keypadDigit}>{digit}</span>
-                    {letters && (
-                      <span style={styles.keypadLetters}>{letters}</span>
-                    )}
+                    {letters && <span style={styles.keypadLetters}>{letters}</span>}
                   </button>
                 ))}
               </div>
@@ -887,8 +753,7 @@ const styles = {
     justifyContent: "center",
     alignItems: "center",
     background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-    fontFamily:
-      "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
     padding: "20px",
   },
   phone: {
@@ -896,8 +761,7 @@ const styles = {
     maxWidth: "100%",
     background: "#ffffff",
     borderRadius: 32,
-    boxShadow:
-      "0 25px 80px rgba(0,0,0,0.25), 0 10px 40px rgba(0,0,0,0.15)",
+    boxShadow: "0 25px 80px rgba(0,0,0,0.25), 0 10px 40px rgba(0,0,0,0.15)",
     overflow: "hidden",
     display: "flex",
     flexDirection: "column",
@@ -944,8 +808,6 @@ const styles = {
     fontSize: 12,
     fontWeight: 500,
   },
-
-  // ─── NEW: Assigned numbers bar ──────────────────────────────────────────
   assignedNumbersBar: {
     marginTop: 12,
     paddingTop: 12,
@@ -976,8 +838,6 @@ const styles = {
     letterSpacing: "0.3px",
     border: "1px solid rgba(255,255,255,0.3)",
   },
-  // ────────────────────────────────────────────────────────────────────────
-
   content: {
     minHeight: 500,
     display: "flex",
@@ -1006,8 +866,7 @@ const styles = {
     width: 120,
     height: 120,
     borderRadius: "50%",
-    background:
-      "linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)",
+    background: "linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -1027,6 +886,7 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: 8,
+    alignItems: "center",
   },
   callerLabel: {
     fontSize: 14,
@@ -1041,6 +901,33 @@ const styles = {
     color: "#1e293b",
     letterSpacing: "-0.5px",
   },
+
+  // ── Called-To badge ────────────────────────────────────────────────────────
+  calledToBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    background: "rgba(102, 126, 234, 0.1)",
+    border: "1px solid rgba(102, 126, 234, 0.25)",
+    borderRadius: 20,
+    padding: "5px 12px",
+    marginTop: 4,
+    color: "#667eea",
+  },
+  calledToLabel: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: "#667eea",
+    textTransform: "uppercase",
+    letterSpacing: "0.4px",
+  },
+  calledToNumber: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#4f46e5",
+  },
+  // ──────────────────────────────────────────────────────────────────────────
+
   incomingActions: {
     display: "flex",
     gap: 20,
@@ -1106,6 +993,7 @@ const styles = {
   activeCallDetails: {
     display: "flex",
     flexDirection: "column",
+    alignItems: "center",
     gap: 8,
   },
   activeNumber: {
