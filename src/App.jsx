@@ -209,17 +209,18 @@ export default function OrbitPhone() {
 
         // Incoming calls
         device.on("incoming", (call) => {
-          console.log("📞 ALL CALL PARAMETERS:", JSON.stringify(call.parameters));
           console.log("📞 Incoming call received:", call.parameters);
           callRef.current = call;
           setIncoming(true);
           setPhoneNumber(call.parameters.From || "Unknown");
 
           // ── Resolve which number this call came in on ─────────────────
-          // CalledNumber is passed as a custom <Parameter> from inboundCall.js
-          // so it is always the real E.164 Twilio number (e.g. +18582983966).
-          // We fall back to To/Called in case of older TwiML without the param.
-          const calledParam = call.parameters.CalledNumber || "";
+          // Twilio bundles custom <Parameter> values into call.parameters.Params
+          // as a URL-encoded string e.g. "recording=true&CalledNumber=%2B18582983966"
+          // So we parse that first, then fall back to To/Called.
+          const rawParams = call.parameters.Params || "";
+          const parsedParams = Object.fromEntries(new URLSearchParams(rawParams));
+          const calledParam = parsedParams.CalledNumber || call.parameters.CalledNumber || "";
           const rawTo = call.parameters.To || "";
           const rawCalled = call.parameters.Called || "";
           const phoneRegex = /^\+?[1-9]\d{6,14}$/;
