@@ -1,0 +1,83 @@
+body, html, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.container {
+  text-align: center;
+  background: rgba(255,255,255,0.1);
+  padding: 40px;
+  border-radius: 16px;
+  backdrop-filter: blur(10px);
+  width: 350px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+}
+
+.title {
+  color: white;
+  margin-bottom: 20px;
+  font-weight: 600;
+}
+
+.status {
+  color: #fff;
+  font-size: 16px;
+  margin-bottom: 20px;
+  font-weight: 500;
+  min-height: 24px;
+}
+
+.phone-number {
+  font-size: 28px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 30px;
+  word-break: break-all;
+}
+
+.buttons {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+}
+
+.redial-btn, .hangup-btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 12px;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.redial-btn {
+  background-color: #4caf50;
+  color: white;
+}
+
+.redial-btn:disabled {
+  background-color: rgba(255,255,255,0.2);
+  cursor: not-allowed;
+}
+
+.hangup-btn {
+  background-color: #f44336;
+  color: white;
+}
+
+.hangup-btn:disabled {
+  background-color: rgba(255,255,255,0.2);
+  cursor: not-allowed;
+}
+
+.redial-btn:hover:not(:disabled),
+.hangup-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+}
