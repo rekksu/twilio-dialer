@@ -10,10 +10,6 @@ const VERIFY_ACCESS_URL =
 const ASSIGNED_NUMBERS_URL =
   "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getAgentNumbers";
 
-// Looks up which of the agent's numbers was actually dialed for an incoming call
-const LOOKUP_CALLED_NUMBER_URL =
-  "https://us-central1-vertexifycx-orbit.cloudfunctions.net/getCalledNumber";
-
 // How many ms before token expiry to refresh (5 minutes)
 const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000;
 // Default token lifetime (1 hour) — override if your backend uses a different TTL
@@ -219,43 +215,25 @@ export default function OrbitPhone() {
           setPhoneNumber(call.parameters.From || "Unknown");
 
           // ── Resolve which number this call came in on ─────────────────
-          // call.parameters.To is often a client identity string like
-          // "client:app_users/Zm1o…" rather than a real phone number.
-          // We use a 3-stage resolution:
-          //   1. Direct: if To / Called looks like a real phone number, use it.
-          //   2. Single-number shortcut: if the agent only has 1 assigned number.
-          //   3. Backend lookup: call getCalledNumber to query Twilio call logs.
+          // CalledNumber is passed as a custom <Parameter> from inboundCall.js
+          // so it is always the real E.164 Twilio number (e.g. +18582983966).
+          // We fall back to To/Called in case of older TwiML without the param.
+          const calledParam = call.parameters.CalledNumber || "";
           const rawTo = call.parameters.To || "";
           const rawCalled = call.parameters.Called || "";
           const phoneRegex = /^\+?[1-9]\d{6,14}$/;
-          const fromNum = call.parameters.From || "";
 
           let resolvedTo = "";
-          if (phoneRegex.test(rawTo.replace(/\s/g, ""))) {
+          if (phoneRegex.test(calledParam.replace(/\s/g, ""))) {
+            resolvedTo = calledParam;
+          } else if (phoneRegex.test(rawTo.replace(/\s/g, ""))) {
             resolvedTo = rawTo;
           } else if (phoneRegex.test(rawCalled.replace(/\s/g, ""))) {
             resolvedTo = rawCalled;
           }
 
-          if (resolvedTo) {
-            setCalledToNumber(resolvedTo);
-          } else {
-            // Stage 3: ask the backend which number was dialed
-            setCalledToNumber(""); // clear while we look up
-            fetch(
-              `${LOOKUP_CALLED_NUMBER_URL}?from=${encodeURIComponent(fromNum)}&agentId=${encodeURIComponent(agentId)}&orgId=${encodeURIComponent(orgId)}`
-            )
-              .then((r) => r.json())
-              .then((d) => {
-                if (d.calledNumber) {
-                  console.log("✅ Resolved called number:", d.calledNumber);
-                  setCalledToNumber(d.calledNumber);
-                }
-              })
-              .catch((err) =>
-                console.warn("Could not resolve called number:", err)
-              );
-          }
+          setCalledToNumber(resolvedTo);
+          console.log("📞 Called number resolved:", resolvedTo || "unknown");
           // ──────────────────────────────────────────────────────────────
 
           setStatus("Incoming call...");
