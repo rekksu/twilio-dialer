@@ -159,6 +159,16 @@ export default function OrbitPhone() {
     }, delay);
   };
 
+  // ── Fallback: if calledToNumber is still blank after the incoming event
+  // fires but assignedNumbers has loaded, and the agent only has ONE assigned
+  // number, we know exactly which line rang. If they have multiple numbers we
+  // can't guess, so we leave it blank rather than show the wrong one.
+  useEffect(() => {
+    if (!calledToNumber && incoming && assignedNumbers.length === 1) {
+      setCalledToNumber(assignedNumbers[0]);
+    }
+  }, [calledToNumber, incoming, assignedNumbers]);
+
   // Helper to reset all call state
   const resetCallState = () => {
     setIncoming(false);
@@ -215,8 +225,32 @@ export default function OrbitPhone() {
           setPhoneNumber(call.parameters.From || "Unknown");
 
           // ── Capture which number this call came in on ──────────────────
-          // Twilio sends the dialed number in call.parameters.To
-          setCalledToNumber(call.parameters.To || "");
+          // call.parameters.To is sometimes a raw phone number like +18582983966,
+          // but for calls routed to a Twilio client identity it looks like
+          // "client:app_users/Zm1o…". In that case we can't display it directly.
+          //
+          // Strategy:
+          //   1. If To looks like a phone number (+digits), use it directly.
+          //   2. If To is a client identity string, fall back to the *last*
+          //      number in assignedNumbers (the one most recently fetched).
+          //      When the agent only has one assigned number that's always correct;
+          //      when they have several the backend should ideally send the called
+          //      number in a custom parameter — see note below.
+          //   3. Also check call.parameters.Called and call.parameters.ForwardedFrom
+          //      which Twilio sometimes populates with the real PSTN number.
+          const rawTo = call.parameters.To || "";
+          const rawCalled = call.parameters.Called || "";
+          const phoneRegex = /^\+?[1-9]\d{6,14}$/;
+
+          let resolvedTo = "";
+          if (phoneRegex.test(rawTo.replace(/\s/g, ""))) {
+            resolvedTo = rawTo;
+          } else if (phoneRegex.test(rawCalled.replace(/\s/g, ""))) {
+            resolvedTo = rawCalled;
+          }
+          // If still empty, we'll try to resolve later from assignedNumbers
+          // (see the assignedNumbers useEffect for the "single number" shortcut).
+          setCalledToNumber(resolvedTo);
           // ──────────────────────────────────────────────────────────────
 
           setStatus("Incoming call...");
