@@ -29,6 +29,7 @@ export default function OrbitPhone() {
   const tokenRefreshTimerRef = useRef(null);
   const callSidRef           = useRef(null);
   const parentCallSidRef     = useRef(null); // customer's PSTN leg SID
+  const transferStatusRef    = useRef(null); // mirrors transferStatus for use in event handlers
 
   // ── State ──
   const [status, setStatus]                     = useState("Initializing…");
@@ -132,6 +133,7 @@ export default function OrbitPhone() {
     setCallDuration(0); callRef.current = null; callSidRef.current = null; parentCallSidRef.current = null;
     setShowTransferPanel(false); setTransferStatus(null); setTransferTarget(null);
     setTransferMode(null); setConsultCallSid(null); setConferenceName(null);
+    transferStatusRef.current = null;
     if (holdMusicRef.current) { holdMusicRef.current.pause(); holdMusicRef.current.currentTime = 0; }
   };
 
@@ -186,7 +188,14 @@ export default function OrbitPhone() {
             console.log("✅ Inbound accepted | callSid:", callSidRef.current);
             setIncoming(false); setInCall(true); setStatus("Connected");
           });
-          call.on("disconnect", () => { resetCallState(); setStatus("Call ended"); setTimeout(() => setStatus("Ready"), 2000); });
+          call.on("disconnect", () => {
+            // ✅ Don't reset if mid-transfer — agent stays in UI to complete/cancel
+            if (transferStatusRef.current === "consulting" || transferStatusRef.current === "conference") {
+              console.log("📞 Call disconnected during transfer — keeping UI alive");
+              return;
+            }
+            resetCallState(); setStatus("Call ended"); setTimeout(() => setStatus("Ready"), 2000);
+          });
           call.on("cancel",     () => { resetCallState(); setStatus("Missed call");    setTimeout(() => setStatus("Ready"), 2000); });
           call.on("reject",     () => { resetCallState(); setStatus("Call rejected");  setTimeout(() => setStatus("Ready"), 2000); });
           call.on("error",  (err) => { setStatus(`Error: ${err.message}`); resetCallState(); setTimeout(() => setStatus("Ready"), 2000); });
@@ -218,7 +227,13 @@ export default function OrbitPhone() {
         console.log("✅ Outbound callSid on accept:", callSidRef.current);
         setStatus("Connected");
       });
-      call.on("disconnect", () => { resetCallState(); setStatus("Call ended"); if (isOutbound) setTimeout(() => window.close(), 1000); });
+      call.on("disconnect", () => {
+        if (transferStatusRef.current === "consulting" || transferStatusRef.current === "conference") {
+          console.log("📞 Outbound disconnected during transfer — keeping UI alive");
+          return;
+        }
+        resetCallState(); setStatus("Call ended"); if (isOutbound) setTimeout(() => window.close(), 1000);
+      });
       call.on("error",  (err) => { setStatus(`Call failed: ${err.message}`); resetCallState(); });
     } catch (err) { setStatus(`Connection failed: ${err.message}`); resetCallState(); }
   };
@@ -280,6 +295,11 @@ export default function OrbitPhone() {
   };
 
   // ── Initiate transfer ──
+  // ✅ Keep transferStatusRef in sync so event handlers can read current value
+  React.useEffect(() => {
+    transferStatusRef.current = transferStatus;
+  }, [transferStatus]);
+
   const initiateTransfer = async (ext, name, manualNum) => {
     if (transferring) return;
     setTransferring(true);
