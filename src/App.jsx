@@ -280,11 +280,14 @@ export default function OrbitPhone() {
     try {
       const effectivePhoneDocId = resolvedPhoneDocId || phoneDocId || fromNumber;
       console.log("🔄 Transfer | callSid:", callSidRef.current, "| phoneDocId:", effectivePhoneDocId);
+      // agentIdentity = the Twilio client identity (without app_users/ prefix)
+      const agentIdentity = agentId ? agentId.replace("app_users/", "") : "";
       const body = {
         action:           "initiate",
         callSid:          callSidRef.current,
         orgId,
         phoneNumberDocId: effectivePhoneDocId,
+        agentIdentity,
       };
       if (ext)       body.targetExtension = ext;
       if (manualNum) body.targetNumber    = manualNum;
