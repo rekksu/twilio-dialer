@@ -423,6 +423,7 @@ export default function OrbitPhone() {
       const body = {
         action:           "start",
         callSid:          callSidRef.current,
+        customerCallSid:  parentCallSidRef.current,
         orgId,
         phoneNumberDocId: effectivePhoneDocId2,
       };
