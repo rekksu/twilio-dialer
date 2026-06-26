@@ -32,6 +32,9 @@ export default function OrbitPhone() {
   const [isRecording, setIsRecording]       = useState(false);
   const [assignedNumbers, setAssignedNumbers] = useState([]);
 
+  // ── Resolved phone doc ID (set on inbound from CalledNumber param) ──
+  const [resolvedPhoneDocId, setResolvedPhoneDocId] = useState(phoneDocId || "");
+
   // ── Transfer state ──
   const [showTransferPanel, setShowTransferPanel] = useState(false);
   const [transferMode, setTransferMode]           = useState(null); // "transfer" | "conference"
@@ -50,7 +53,9 @@ export default function OrbitPhone() {
   const fromNumber   = params.get("from");
   const toNumber     = params.get("to");
   const orgId        = params.get("orgId");
-  const phoneDocId   = params.get("phoneDocId") || fromNumber; // phoneNumberDocId for extensions
+  // ✅ phoneDocId = the Twilio number doc ID (same as fromNumber in E.164 format)
+  // fromNumber IS the phoneNumberDocId since phone_numbers docs are keyed by E.164 number
+  const phoneDocId   = params.get("phoneDocId") || fromNumber || calledToNumber;
 
   const isOutbound = !!(fromNumber && toNumber);
 
@@ -148,7 +153,10 @@ export default function OrbitPhone() {
 
         device.on("incoming", (call) => {
           callRef.current = call;
-          callSidRef.current = call.parameters.CallSid;
+          // ✅ Twilio inbound CallSid is in call.parameters.CallSid
+          const inboundSid = call.parameters?.CallSid || call.parameters?.callsid || null;
+          callSidRef.current = inboundSid;
+          console.log("📞 Inbound callSid:", inboundSid, "| params:", JSON.stringify(call.parameters));
           setIncoming(true);
           setPhoneNumber(call.parameters.From || "Unknown");
 
@@ -163,9 +171,17 @@ export default function OrbitPhone() {
           else if (phoneReg.test(rawTo.replace(/\s/g, "")))   resolved = rawTo;
           else if (phoneReg.test(rawCalled.replace(/\s/g,""))) resolved = rawCalled;
           setCalledToNumber(resolved);
+          // ✅ Use CalledNumber as phoneDocId for extension lookup
+          if (resolved) setResolvedPhoneDocId(resolved);
           setStatus("Incoming call...");
 
-          call.on("accept",     () => { setIncoming(false); setInCall(true); setStatus("Connected"); });
+          call.on("accept", () => {
+            // ✅ Re-capture callSid on accept — most reliable moment for inbound
+            const sid = call.parameters?.CallSid || callSidRef.current;
+            if (sid) callSidRef.current = sid;
+            console.log("✅ Inbound accepted | callSid:", callSidRef.current);
+            setIncoming(false); setInCall(true); setStatus("Connected");
+          });
           call.on("disconnect", () => { resetCallState(); setStatus("Call ended"); setTimeout(() => setStatus("Ready"), 2000); });
           call.on("cancel",     () => { resetCallState(); setStatus("Missed call");    setTimeout(() => setStatus("Ready"), 2000); });
           call.on("reject",     () => { resetCallState(); setStatus("Call rejected");  setTimeout(() => setStatus("Ready"), 2000); });
@@ -192,14 +208,27 @@ export default function OrbitPhone() {
       callSidRef.current = call.parameters?.CallSid;
       setInCall(true);
       call.on("ringing",    () => setStatus("Ringing..."));
-      call.on("accept",     () => { setStatus("Connected"); callSidRef.current = call.parameters?.CallSid; });
+      call.on("accept",     (acceptedCall) => {
+        const sid = acceptedCall?.parameters?.CallSid || call.parameters?.CallSid;
+        if (sid) callSidRef.current = sid;
+        console.log("✅ Outbound callSid on accept:", callSidRef.current);
+        setStatus("Connected");
+      });
       call.on("disconnect", () => { resetCallState(); setStatus("Call ended"); if (isOutbound) setTimeout(() => window.close(), 1000); });
       call.on("error",  (err) => { setStatus(`Call failed: ${err.message}`); resetCallState(); });
     } catch (err) { setStatus(`Connection failed: ${err.message}`); resetCallState(); }
   };
 
   // ── Call controls ──
-  const accept    = () => { if (!callRef.current) return; callRef.current.accept(); setIncoming(false); setInCall(true); setStatus("Connected"); };
+  const accept = () => {
+    if (!callRef.current) return;
+    callRef.current.accept();
+    // ✅ Ensure callSid is set when agent taps Accept
+    const sid = callRef.current.parameters?.CallSid || callSidRef.current;
+    if (sid) callSidRef.current = sid;
+    console.log("✅ Agent accepted | callSid:", callSidRef.current);
+    setIncoming(false); setInCall(true); setStatus("Connected");
+  };
   const reject    = () => { if (!callRef.current) return; callRef.current.reject(); resetCallState(); setStatus("Call rejected"); };
   const hangup    = () => { if (!callRef.current) return; callRef.current.disconnect(); resetCallState(); };
   const toggleMic = () => { if (!callRef.current) return; callRef.current.mute(!micMuted); setMicMuted(!micMuted); };
@@ -249,11 +278,13 @@ export default function OrbitPhone() {
     if (transferring) return;
     setTransferring(true);
     try {
+      const effectivePhoneDocId = resolvedPhoneDocId || phoneDocId || fromNumber;
+      console.log("🔄 Transfer | callSid:", callSidRef.current, "| phoneDocId:", effectivePhoneDocId);
       const body = {
-        action:          "initiate",
-        callSid:         callSidRef.current,
+        action:           "initiate",
+        callSid:          callSidRef.current,
         orgId,
-        phoneNumberDocId: phoneDocId,
+        phoneNumberDocId: effectivePhoneDocId,
       };
       if (ext)       body.targetExtension = ext;
       if (manualNum) body.targetNumber    = manualNum;
@@ -306,11 +337,13 @@ export default function OrbitPhone() {
     if (transferring) return;
     setTransferring(true);
     try {
+      const effectivePhoneDocId2 = resolvedPhoneDocId || phoneDocId || fromNumber;
+      console.log("🎯 Conference | callSid:", callSidRef.current, "| phoneDocId:", effectivePhoneDocId2);
       const body = {
-        action: "start",
-        callSid: callSidRef.current,
+        action:           "start",
+        callSid:          callSidRef.current,
         orgId,
-        phoneNumberDocId: phoneDocId,
+        phoneNumberDocId: effectivePhoneDocId2,
       };
       if (ext)       body.targetExtension = ext;
       if (manualNum) body.targetNumber    = manualNum;
