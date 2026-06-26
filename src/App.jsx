@@ -12,55 +12,52 @@ const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000;
 const DEFAULT_TOKEN_TTL_MS     = 60 * 60 * 1000;
 
 export default function OrbitPhone() {
-  const deviceRef            = useRef(null);
-  const callRef              = useRef(null);
-  const holdMusicRef         = useRef(null);
-  const tokenRefreshTimerRef = useRef(null);
-
-  const [status, setStatus]           = useState("Initializing…");
-  const [incoming, setIncoming]       = useState(false);
-  const [inCall, setInCall]           = useState(false);
-  const [audioEnabled, setAudioEnabled] = useState(false);
-  const [micMuted, setMicMuted]       = useState(false);
-  const [onHold, setOnHold]           = useState(false);
-  const [showKeypad, setShowKeypad]   = useState(false);
-  const [authorized, setAuthorized]   = useState(false);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [calledToNumber, setCalledToNumber] = useState("");
-  const [callDuration, setCallDuration]     = useState(0);
-  const [isRecording, setIsRecording]       = useState(false);
-  const [assignedNumbers, setAssignedNumbers] = useState([]);
-
-  // ── Resolved phone doc ID (set on inbound from CalledNumber param) ──
-  const [resolvedPhoneDocId, setResolvedPhoneDocId] = useState(phoneDocId || "");
-
-  // ── Transfer state ──
-  const [showTransferPanel, setShowTransferPanel] = useState(false);
-  const [transferMode, setTransferMode]           = useState(null); // "transfer" | "conference"
-  const [transferStatus, setTransferStatus]       = useState(null); // null | "consulting" | "completed" | "conference"
-  const [transferTarget, setTransferTarget]       = useState(null); // { name, extension }
-  const [consultCallSid, setConsultCallSid]       = useState(null);
-  const [conferenceName, setConferenceName]       = useState(null);
-  const [extensions, setExtensions]               = useState({ employees: [], departments: [] });
-  const [loadingExtensions, setLoadingExtensions] = useState(false);
-  const [manualNumber, setManualNumber]           = useState("");
-  const [transferring, setTransferring]           = useState(false);
-
+  // ── URL params — parsed FIRST before any hooks ──
   const params       = new URLSearchParams(window.location.search);
   const agentId      = params.get("agentId");
   const accessKey    = params.get("accessKey");
   const fromNumber   = params.get("from");
   const toNumber     = params.get("to");
   const orgId        = params.get("orgId");
-  // ✅ phoneDocId = the Twilio number doc ID (same as fromNumber in E.164 format)
-  // fromNumber IS the phoneNumberDocId since phone_numbers docs are keyed by E.164 number
-  const phoneDocId   = params.get("phoneDocId") || fromNumber || calledToNumber;
+  const phoneDocId   = params.get("phoneDocId") || fromNumber || null;
+  const isOutbound   = !!(fromNumber && toNumber);
 
-  const isOutbound = !!(fromNumber && toNumber);
+  // ── Refs ──
+  const deviceRef            = useRef(null);
+  const callRef              = useRef(null);
+  const holdMusicRef         = useRef(null);
+  const tokenRefreshTimerRef = useRef(null);
+  const callSidRef           = useRef(null);
 
-  // ── Active callSid ref (needed for transfer/conference API calls) ──
-  const callSidRef = useRef(null);
+  // ── State ──
+  const [status, setStatus]                     = useState("Initializing…");
+  const [incoming, setIncoming]                 = useState(false);
+  const [inCall, setInCall]                     = useState(false);
+  const [audioEnabled, setAudioEnabled]         = useState(false);
+  const [micMuted, setMicMuted]                 = useState(false);
+  const [onHold, setOnHold]                     = useState(false);
+  const [showKeypad, setShowKeypad]             = useState(false);
+  const [authorized, setAuthorized]             = useState(false);
+  const [authChecked, setAuthChecked]           = useState(false);
+  const [phoneNumber, setPhoneNumber]           = useState("");
+  const [calledToNumber, setCalledToNumber]     = useState("");
+  const [callDuration, setCallDuration]         = useState(0);
+  const [isRecording, setIsRecording]           = useState(false);
+  const [assignedNumbers, setAssignedNumbers]   = useState([]);
+  // ✅ resolvedPhoneDocId — updated when inbound CalledNumber arrives
+  const [resolvedPhoneDocId, setResolvedPhoneDocId] = useState(phoneDocId || "");
+
+  // ── Transfer/conference state ──
+  const [showTransferPanel, setShowTransferPanel] = useState(false);
+  const [transferMode, setTransferMode]           = useState(null);
+  const [transferStatus, setTransferStatus]       = useState(null);
+  const [transferTarget, setTransferTarget]       = useState(null);
+  const [consultCallSid, setConsultCallSid]       = useState(null);
+  const [conferenceName, setConferenceName]       = useState(null);
+  const [extensions, setExtensions]               = useState({ employees: [], departments: [] });
+  const [loadingExtensions, setLoadingExtensions] = useState(false);
+  const [manualNumber, setManualNumber]           = useState("");
+  const [transferring, setTransferring]           = useState(false);
 
   useEffect(() => {
     holdMusicRef.current = new Audio("https://www.twilio.com/docs/voice/twiml/play/hold-music.mp3");
