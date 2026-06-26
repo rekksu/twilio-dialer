@@ -189,9 +189,17 @@ export default function OrbitPhone() {
             setIncoming(false); setInCall(true); setStatus("Connected");
           });
           call.on("disconnect", () => {
-            // ✅ Don't reset if mid-transfer — agent stays in UI to complete/cancel
             if (transferStatusRef.current === "consulting" || transferStatusRef.current === "conference") {
+              // ✅ Mid-transfer — keep UI alive so agent can tap Complete/Cancel
               console.log("📞 Call disconnected during transfer — keeping UI alive");
+              return;
+            }
+            if (transferStatusRef.current === "completed") {
+              // ✅ Transfer completed — reset cleanly
+              console.log("📞 Call disconnected after transfer complete — resetting");
+              resetCallState();
+              setStatus("Transfer completed");
+              setTimeout(() => setStatus("Ready"), 2000);
               return;
             }
             resetCallState(); setStatus("Call ended"); setTimeout(() => setStatus("Ready"), 2000);
@@ -230,6 +238,12 @@ export default function OrbitPhone() {
       call.on("disconnect", () => {
         if (transferStatusRef.current === "consulting" || transferStatusRef.current === "conference") {
           console.log("📞 Outbound disconnected during transfer — keeping UI alive");
+          return;
+        }
+        if (transferStatusRef.current === "completed") {
+          resetCallState();
+          setStatus("Transfer completed");
+          setTimeout(() => setStatus("Ready"), 2000);
           return;
         }
         resetCallState(); setStatus("Call ended"); if (isOutbound) setTimeout(() => window.close(), 1000);
@@ -340,15 +354,28 @@ export default function OrbitPhone() {
   // ── Complete warm transfer ──
   const completeTransfer = async () => {
     setTransferring(true);
+    // ✅ Set status to completed FIRST so disconnect handler knows to reset
+    setTransferStatus("completed");
+    transferStatusRef.current = "completed";
     try {
       const res  = await fetch(TRANSFER_URL, {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ action:"complete", callSid: callSidRef.current, orgId }),
       });
       const data = await res.json();
-      if (data.success) { setTransferStatus("completed"); setTimeout(() => resetCallState(), 1000); }
-      else alert(`Complete failed: ${data.error}`);
-    } catch (err) { alert(`Error: ${err.message}`); }
+      if (data.success) {
+        console.log("✅ Transfer completed — resetting UI");
+        setTimeout(() => resetCallState(), 500);
+      } else {
+        setTransferStatus("consulting");
+        transferStatusRef.current = "consulting";
+        alert(`Complete failed: ${data.error}`);
+      }
+    } catch (err) {
+      setTransferStatus("consulting");
+      transferStatusRef.current = "consulting";
+      alert(`Error: ${err.message}`);
+    }
     setTransferring(false);
   };
 
