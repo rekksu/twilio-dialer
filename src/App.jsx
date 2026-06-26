@@ -28,6 +28,7 @@ export default function OrbitPhone() {
   const holdMusicRef         = useRef(null);
   const tokenRefreshTimerRef = useRef(null);
   const callSidRef           = useRef(null);
+  const parentCallSidRef     = useRef(null); // customer's PSTN leg SID
 
   // ── State ──
   const [status, setStatus]                     = useState("Initializing…");
@@ -128,7 +129,7 @@ export default function OrbitPhone() {
   const resetCallState = () => {
     setIncoming(false); setInCall(false); setMicMuted(false); setOnHold(false);
     setShowKeypad(false); setIsRecording(false); setPhoneNumber(""); setCalledToNumber("");
-    setCallDuration(0); callRef.current = null; callSidRef.current = null;
+    setCallDuration(0); callRef.current = null; callSidRef.current = null; parentCallSidRef.current = null;
     setShowTransferPanel(false); setTransferStatus(null); setTransferTarget(null);
     setTransferMode(null); setConsultCallSid(null); setConferenceName(null);
     if (holdMusicRef.current) { holdMusicRef.current.pause(); holdMusicRef.current.currentTime = 0; }
@@ -151,9 +152,11 @@ export default function OrbitPhone() {
         device.on("incoming", (call) => {
           callRef.current = call;
           // ✅ Twilio inbound CallSid is in call.parameters.CallSid
-          const inboundSid = call.parameters?.CallSid || call.parameters?.callsid || null;
+          const inboundSid   = call.parameters?.CallSid || call.parameters?.callsid || null;
+          const parentSid    = call.parameters?.ParentCallSid || null;
           callSidRef.current = inboundSid;
-          console.log("📞 Inbound callSid:", inboundSid, "| params:", JSON.stringify(call.parameters));
+          parentCallSidRef.current = parentSid;
+          console.log("📞 Inbound callSid:", inboundSid, "| parentSid:", parentSid, "| params:", JSON.stringify(call.parameters));
           setIncoming(true);
           setPhoneNumber(call.parameters.From || "Unknown");
 
@@ -164,12 +167,16 @@ export default function OrbitPhone() {
           const rawCalled   = call.parameters.Called || "";
           const phoneReg    = /^\+?[1-9]\d{6,14}$/;
           let resolved = "";
-          if (phoneReg.test(calledParam.replace(/\s/g, "")))  resolved = calledParam;
-          else if (phoneReg.test(rawTo.replace(/\s/g, "")))   resolved = rawTo;
+          if (phoneReg.test(calledParam.replace(/\s/g, "")))   resolved = calledParam;
+          else if (phoneReg.test(rawTo.replace(/\s/g, "")))    resolved = rawTo;
           else if (phoneReg.test(rawCalled.replace(/\s/g,""))) resolved = rawCalled;
           setCalledToNumber(resolved);
           // ✅ Use CalledNumber as phoneDocId for extension lookup
-          if (resolved) setResolvedPhoneDocId(resolved);
+          // Also check assignedNumbers[0] as fallback since inbound client calls
+          // don't always include the original Twilio number in parameters
+          const effectiveDocId = resolved || phoneDocId || (assignedNumbers.length > 0 ? assignedNumbers[0] : "");
+          if (effectiveDocId) setResolvedPhoneDocId(effectiveDocId);
+          console.log("📞 resolvedPhoneDocId set to:", effectiveDocId);
           setStatus("Incoming call...");
 
           call.on("accept", () => {
@@ -251,10 +258,12 @@ export default function OrbitPhone() {
     if (!orgId) return;
     setLoadingExtensions(true);
     try {
-      // phoneDocId is optional — falls back to all extensions for org
-      const url = phoneDocId
-        ? `${EXTENSIONS_URL}?orgId=${encodeURIComponent(orgId)}&phoneNumberDocId=${encodeURIComponent(phoneDocId)}`
+      // ✅ Use resolvedPhoneDocId if available, fall back to phoneDocId or assignedNumbers[0]
+      const effectiveDocId = resolvedPhoneDocId || phoneDocId || (assignedNumbers.length > 0 ? assignedNumbers[0] : null);
+      const url = effectiveDocId
+        ? `${EXTENSIONS_URL}?orgId=${encodeURIComponent(orgId)}&phoneNumberDocId=${encodeURIComponent(effectiveDocId)}`
         : `${EXTENSIONS_URL}?orgId=${encodeURIComponent(orgId)}`;
+      console.log("📋 Loading extensions | url:", url);
       const res  = await fetch(url);
       const data = await res.json();
       if (data.success) setExtensions({ employees: data.employees || [], departments: data.departments || [] });
@@ -275,13 +284,15 @@ export default function OrbitPhone() {
     if (transferring) return;
     setTransferring(true);
     try {
-      const effectivePhoneDocId = resolvedPhoneDocId || phoneDocId || fromNumber;
+      const effectivePhoneDocId = resolvedPhoneDocId || phoneDocId || fromNumber
+        || (assignedNumbers.length > 0 ? assignedNumbers[0] : null);
       console.log("🔄 Transfer | callSid:", callSidRef.current, "| phoneDocId:", effectivePhoneDocId);
       // agentIdentity = the Twilio client identity (without app_users/ prefix)
       const agentIdentity = agentId ? agentId.replace("app_users/", "") : "";
       const body = {
         action:           "initiate",
         callSid:          callSidRef.current,
+        customerCallSid:  parentCallSidRef.current, // customer's PSTN leg
         orgId,
         phoneNumberDocId: effectivePhoneDocId,
         agentIdentity,
@@ -337,7 +348,8 @@ export default function OrbitPhone() {
     if (transferring) return;
     setTransferring(true);
     try {
-      const effectivePhoneDocId2 = resolvedPhoneDocId || phoneDocId || fromNumber;
+      const effectivePhoneDocId2 = resolvedPhoneDocId || phoneDocId || fromNumber
+        || (assignedNumbers.length > 0 ? assignedNumbers[0] : null);
       console.log("🎯 Conference | callSid:", callSidRef.current, "| phoneDocId:", effectivePhoneDocId2);
       const body = {
         action:           "start",
