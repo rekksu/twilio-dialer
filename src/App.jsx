@@ -263,7 +263,29 @@ export default function OrbitPhone() {
     setIncoming(false); setInCall(true); setStatus("Connected");
   };
   const reject    = () => { if (!callRef.current) return; callRef.current.reject(); resetCallState(); setStatus("Call rejected"); };
-  const hangup    = () => { if (!callRef.current) return; callRef.current.disconnect(); resetCallState(); };
+  const hangup = async () => {
+    if (!callRef.current) return;
+    // ✅ If in conference, end all participants before hanging up
+    if (transferStatusRef.current === 'conference' && callSidRef.current) {
+      try {
+        await fetch(CONFERENCE_URL, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ action: 'end', callSid: callSidRef.current, orgId }),
+        });
+      } catch (e) { console.error('Conference end error:', e); }
+    }
+    // ✅ If in transfer consultation, cancel it
+    if (transferStatusRef.current === 'consulting' && callSidRef.current) {
+      try {
+        await fetch(TRANSFER_URL, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ action: 'cancel', callSid: callSidRef.current, orgId }),
+        });
+      } catch (e) { console.error('Transfer cancel error:', e); }
+    }
+    callRef.current.disconnect();
+    resetCallState();
+  };
   const toggleMic = () => { if (!callRef.current) return; callRef.current.mute(!micMuted); setMicMuted(!micMuted); };
 
   const toggleHold = () => {
