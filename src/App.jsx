@@ -222,10 +222,14 @@ export default function OrbitPhone() {
 
   // ── Load extensions for picker ──
   const loadExtensions = async () => {
-    if (!orgId || !phoneDocId) return;
+    if (!orgId) return;
     setLoadingExtensions(true);
     try {
-      const res  = await fetch(`${EXTENSIONS_URL}?orgId=${encodeURIComponent(orgId)}&phoneNumberDocId=${encodeURIComponent(phoneDocId)}`);
+      // phoneDocId is optional — falls back to all extensions for org
+      const url = phoneDocId
+        ? `${EXTENSIONS_URL}?orgId=${encodeURIComponent(orgId)}&phoneNumberDocId=${encodeURIComponent(phoneDocId)}`
+        : `${EXTENSIONS_URL}?orgId=${encodeURIComponent(orgId)}`;
+      const res  = await fetch(url);
       const data = await res.json();
       if (data.success) setExtensions({ employees: data.employees || [], departments: data.departments || [] });
     } catch (err) { console.error("Failed to load extensions:", err); }
